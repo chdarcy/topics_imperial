@@ -1,0 +1,4 @@
+pandas>=1.5.0
+openpyxl>=3.0.10
+# Optional: if you expect Excel files in older .xls format, add:
+# xlrd>=2.0.1
