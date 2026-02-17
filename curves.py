@@ -116,3 +116,36 @@ def interpolate_to_grid(
         rates_interp = rates_reindexed.interpolate(axis=1, method="linear", limit_area="inside")
 
     return rates_interp[target]
+
+
+def compute_forward_rates(spot_curves: pd.DataFrame) -> pd.DataFrame:
+    """Compute forward rates between adjacent maturities on the grid.
+
+    For consecutive maturities T_{i-1} and T_i on the grid, the forward
+    rate over [T_{i-1}, T_i] is:
+
+        f_i = (T_i * S(T_i) - T_{i-1} * S(T_{i-1})) / (T_i - T_{i-1})
+
+    This uses the linear zero-rate approximation appropriate for OIS rates.
+
+    Parameters
+    ----------
+    spot_curves : pd.DataFrame
+        Interpolated spot curves (dates x maturities in decimal).
+
+    Returns
+    -------
+    pd.DataFrame of forward rates, indexed by date, columns are the
+    right-endpoint maturity of each forward interval.
+    """
+    mats = sorted(float(c) for c in spot_curves.columns)
+    result = pd.DataFrame(index=spot_curves.index)
+
+    for i in range(1, len(mats)):
+        t_prev, t_cur = mats[i - 1], mats[i]
+        dt = t_cur - t_prev
+        result[t_cur] = (
+            t_cur * spot_curves[t_cur] - t_prev * spot_curves[t_prev]
+        ) / dt
+
+    return result
