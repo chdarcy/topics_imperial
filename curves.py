@@ -13,8 +13,8 @@ TENOR_MAP = {
     "BPSWS2Z Curncy": 2 / 52,      # 2 weeks
     "BPSWSA Curncy": 1 / 12,       # 1 month
     "BPSWSB Curncy": 2 / 12,       # 2 months
-    "BPSWSC Curncy": 3 / 12,       # 3 months
-    "BPSWSD Curncy": 4 / 12,       # 4 months
+    # BPSWSC (3mo) and BPSWSD (4mo) not present in dataset
+
     "BPSWSE Curncy": 5 / 12,       # 5 months
     "BPSWSF Curncy": 6 / 12,       # 6 months
     "BPSWSG Curncy": 7 / 12,       # 7 months
@@ -25,6 +25,7 @@ TENOR_MAP = {
 
     # Standard yearly tenors (MAIN PCA INPUT)
     "BPSWS1 Curncy": 1,
+    "BPSWS1F Curncy": 18 / 12,    # 18 months
     "BPSWS2 Curncy": 2,
     "BPSWS3 Curncy": 3,
     "BPSWS4 Curncy": 4,
