@@ -56,6 +56,7 @@ def _ensure_date_index(df: pd.DataFrame) -> pd.DataFrame:
         c = dt_cols.columns[0]
         df2 = df.copy()
         df2.index = pd.to_datetime(df2[c])
+        df2.index.name = "date"
         return df2.drop(columns=[c])
 
     # Fallback: try parsing the first column to datetimes.
@@ -64,6 +65,7 @@ def _ensure_date_index(df: pd.DataFrame) -> pd.DataFrame:
     if parsed.notna().any():
         df2 = df.copy()
         df2.index = parsed
+        df2.index.name = "date"
         return df2.drop(columns=[first])
 
     return df
@@ -145,7 +147,7 @@ def compute_forward_rates(spot_curves: pd.DataFrame) -> pd.DataFrame:
     for i in range(1, len(mats)):
         t_prev, t_cur = mats[i - 1], mats[i]
         dt = t_cur - t_prev
-        result[t_cur] = (
+        result[float(t_cur)] = (
             t_cur * spot_curves[t_cur] - t_prev * spot_curves[t_prev]
         ) / dt
 

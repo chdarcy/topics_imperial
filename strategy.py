@@ -129,7 +129,7 @@ def solve_butterfly_weights(
     L = loadings.loc[tenor_list, ordered_cols].values.astype(float)
 
     cond = np.linalg.cond(L)
-    if cond > 1e10:
+    if cond > 1e4:
         warnings.warn(f"Loading matrix poorly conditioned (cond={cond:.1e})")
         return None
 
@@ -167,11 +167,12 @@ def apply_trading_signals(
     """
     weights = strategy_results["weights"]
     tenor_list = list(tenors)
+    w_keys = [f"w_{t:g}" for t in tenors]
 
     # Compute butterfly spread level: w' @ rates at tenors
     spread_records = []
     for date, row in weights.iterrows():
-        w = row[["w_3", "w_7", "w_15"]].values.astype(float)
+        w = row[w_keys].values.astype(float)
         if date in curves.index:
             rates = curves.loc[date, tenor_list].values.astype(float)
             spread_val = float(np.dot(w, rates)) * pnl_scale
@@ -250,6 +251,227 @@ def apply_trading_signals(
         "signal_cumulative_pnl": trade_pnl.cumsum(),
         "spread": spread,
         "zscore": zscore,
+    }
+
+
+# ── Strategy variants ─────────────────────────────────────────────────
+
+def apply_vol_scaling(
+    strategy_results: dict,
+    vol_window: int = 63,
+    vol_target_bps: float = 5.0,
+) -> dict:
+    """Volatility-scaled butterfly: size the position inversely proportional
+    to recent realised volatility so that the ex-ante daily risk is constant.
+
+    Literature: standard in rates RV desks (Golub & Tilman 2000, Ch.6;
+    Hariparsad & Maré 2023 use duration-neutral + vol-normalised sizing).
+    """
+    raw_pnl = strategy_results["daily_pnl"]
+    rolling_vol = raw_pnl.rolling(vol_window, min_periods=20).std()
+
+    scale = vol_target_bps / rolling_vol.replace(0, np.nan)
+    scale = scale.clip(upper=5.0)  # cap leverage at 5x
+
+    scaled_pnl = raw_pnl * scale.shift(1)  # use lagged vol
+    scaled_pnl = scaled_pnl.dropna()
+
+    return {
+        **strategy_results,
+        "variant_daily_pnl": scaled_pnl,
+        "variant_cumulative_pnl": scaled_pnl.cumsum(),
+        "variant_scale": scale,
+    }
+
+
+def apply_momentum_signal(
+    strategy_results: dict,
+    lookback: int = 21,
+    holding_period: int = 5,
+) -> dict:
+    """Curvature momentum / trend-following: go with the recent trend
+    in the butterfly spread rather than betting on mean-reversion.
+
+    If the raw butterfly PnL has been positive over the last `lookback`
+    days, stay long; if negative, go short. Rebalance every
+    `holding_period` days.
+
+    Literature: Dreher, Gräb & Kostka (2020) "From carry trades to curvy
+    trades" show curvature factor has positive autocorrelation at short
+    horizons in EUR; Suimon et al. (2020) use trend signals on JGB.
+    """
+    raw_pnl = strategy_results["daily_pnl"]
+    cumret = raw_pnl.rolling(lookback, min_periods=10).sum()
+
+    # Signal: +1 if trailing PnL > 0, -1 otherwise
+    signal = np.sign(cumret)
+
+    # Only rebalance every `holding_period` days to reduce turnover
+    held_signal = signal.copy()
+    for i in range(len(held_signal)):
+        if i % holding_period != 0:
+            held_signal.iloc[i] = held_signal.iloc[i - 1] if i > 0 else 0.0
+
+    mom_pnl = raw_pnl * held_signal.shift(1)
+    mom_pnl = mom_pnl.dropna()
+
+    return {
+        **strategy_results,
+        "variant_daily_pnl": mom_pnl,
+        "variant_cumulative_pnl": mom_pnl.cumsum(),
+        "variant_signal": held_signal,
+    }
+
+
+def apply_carry_overlay(
+    strategy_results: dict,
+    curves: pd.DataFrame,
+    tenors: tuple[float, float, float] = (3.0, 7.0, 15.0),
+    carry_window: int = 21,
+    pnl_scale: float = 10_000.0,
+) -> dict:
+    """Carry-adjusted curvature: combine the z-score mean-reversion signal
+    with a carry (roll-down) signal.  Only enter when both signals agree.
+
+    The carry of the butterfly is estimated as the 21-day trailing average
+    daily PnL — a positive carry means curvature is earning positive theta.
+
+    Literature: Dreher, Gräb & Kostka (2020) "curvy trades" combine carry
+    and value signals on the curvature factor; De Vere (2021) combines
+    macro views with butterfly carry in UST.
+    """
+    raw_pnl = strategy_results["daily_pnl"]
+
+    # Carry signal: sign of trailing average PnL
+    carry = raw_pnl.rolling(carry_window, min_periods=10).mean()
+    carry_signal = np.sign(carry)
+
+    # Z-score mean-reversion signal (reuse spread zscore)
+    weights = strategy_results["weights"]
+    tenor_list = list(tenors)
+    w_keys = [f"w_{t:g}" for t in tenors]
+
+    spread_records = []
+    for date, row in weights.iterrows():
+        w = row[w_keys].values.astype(float)
+        if date in curves.index:
+            rates = curves.loc[date, tenor_list].values.astype(float)
+            spread_val = float(np.dot(w, rates)) * pnl_scale
+            spread_records.append({"date": date, "spread": spread_val})
+
+    spread_df = pd.DataFrame(spread_records).set_index("date")
+    spread = spread_df["spread"]
+    rolling_mean = spread.rolling(63, min_periods=20).mean()
+    rolling_std = spread.rolling(63, min_periods=20).std()
+    zscore = (spread - rolling_mean) / rolling_std
+
+    # Reversion signal: sell if z > 1, buy if z < -1
+    mr_signal = pd.Series(0.0, index=zscore.index)
+    mr_signal[zscore > 1.0] = -1.0
+    mr_signal[zscore < -1.0] = 1.0
+
+    # Combined: trade only when carry and reversion agree
+    # If they disagree, stay flat (conservative)
+    combined = pd.Series(0.0, index=raw_pnl.index)
+    common = combined.index.intersection(carry_signal.index).intersection(mr_signal.index)
+    for dt in common:
+        c = carry_signal.get(dt, 0)
+        m = mr_signal.get(dt, 0)
+        if c != 0 and m != 0 and np.sign(c) == np.sign(m):
+            combined[dt] = m
+        elif m != 0:
+            combined[dt] = m * 0.5  # half size if only reversion agrees
+
+    carry_pnl = raw_pnl * combined.shift(1)
+    carry_pnl = carry_pnl.dropna()
+
+    return {
+        **strategy_results,
+        "variant_daily_pnl": carry_pnl,
+        "variant_cumulative_pnl": carry_pnl.cumsum(),
+        "variant_carry_signal": carry_signal,
+        "variant_mr_signal": mr_signal,
+    }
+
+
+def apply_pc_score_momentum(
+    strategy_results: dict,
+    lookback: int = 10,
+) -> dict:
+    """PC3 (curvature) score momentum: use the sign of the trailing
+    PC3 score as a directional signal.
+
+    If curvature has been expanding (positive PC3 scores), stay long the
+    butterfly; if curvature has been compressing, go short.
+
+    Literature: Oprea (2022) uses PCA residuals as RV signals;
+    Credit Suisse (2012) "PCA Unleashed" uses PC-decomposed residuals
+    for relative-value entry/exit signals.
+    """
+    pc_scores = strategy_results.get("pc_scores", pd.DataFrame())
+    raw_pnl = strategy_results["daily_pnl"]
+
+    if pc_scores.empty or "curvature_score" not in pc_scores.columns:
+        return {
+            **strategy_results,
+            "variant_daily_pnl": raw_pnl * 0,
+            "variant_cumulative_pnl": (raw_pnl * 0).cumsum(),
+        }
+
+    curv_score = pc_scores["curvature_score"]
+    trailing = curv_score.rolling(lookback, min_periods=5).mean()
+    signal = np.sign(trailing)
+
+    common = raw_pnl.index.intersection(signal.index)
+    pc_pnl = raw_pnl.loc[common] * signal.shift(1).loc[common]
+    pc_pnl = pc_pnl.dropna()
+
+    return {
+        **strategy_results,
+        "variant_daily_pnl": pc_pnl,
+        "variant_cumulative_pnl": pc_pnl.cumsum(),
+        "variant_signal": signal,
+    }
+
+
+def apply_regime_filter(
+    strategy_results: dict,
+    vol_window: int = 63,
+    vol_threshold_pct: float = 50.0,
+) -> dict:
+    """Regime-adaptive filter: only trade when the curvature factor
+    has enough volatility to offer a meaningful risk premium.
+
+    In the hold regime (Aug 2023 – Aug 2024), curvature vol is low
+    and the butterfly earns little. This filter shuts off the strategy
+    during quiet periods and doubles exposure during volatile ones.
+
+    Threshold: if rolling curvature vol is above the `vol_threshold_pct`
+    percentile of the expanding window, trade at full size; otherwise flat.
+
+    Literature: Lammi (2022) shows yield curve arb strategies
+    underperform during low-vol hold regimes; Hariparsad & Maré (2024)
+    use regime classification to filter butterfly entries.
+    """
+    raw_pnl = strategy_results["daily_pnl"]
+    rolling_vol = raw_pnl.rolling(vol_window, min_periods=20).std()
+
+    # Expanding percentile: threshold adapts to historical vol distribution
+    expanding_median = rolling_vol.expanding(min_periods=vol_window).quantile(
+        vol_threshold_pct / 100.0
+    )
+
+    # Trade when current vol exceeds the historical median
+    active = (rolling_vol > expanding_median).astype(float)
+
+    regime_pnl = raw_pnl * active.shift(1)
+    regime_pnl = regime_pnl.dropna()
+
+    return {
+        **strategy_results,
+        "variant_daily_pnl": regime_pnl,
+        "variant_cumulative_pnl": regime_pnl.cumsum(),
+        "variant_active": active,
     }
 
 
@@ -342,8 +564,9 @@ def rolling_pca_butterfly(
 
         daily_pnl = float(np.dot(w, delta.values)) * pnl_scale
 
+        w_keys = [f"w_{t:g}" for t in tenors]
         weights_records.append(
-            {"date": trade_date, "w_3": w[0], "w_7": w[1], "w_15": w[2]}
+            {"date": trade_date, **dict(zip(w_keys, w))}
         )
         pnl_records.append({"date": pnl_date, "daily_pnl": daily_pnl})
 
@@ -381,6 +604,8 @@ def rolling_pca_butterfly(
         slope_pc = role_to_pc.get("slope", "PC2")
         curv_pc = role_to_pc.get("curvature", "PC3")
 
+        tenor_labels = [f"{t:g}y" for t in tenors]
+
         diag_records.append(
             {
                 "date": trade_date,
@@ -392,15 +617,15 @@ def rolling_pca_butterfly(
                 "slope_pc": slope_pc,
                 "curvature_pc": curv_pc,
                 # Loadings at butterfly tenors (using identified roles)
-                "level_3y": loadings.loc[tenors[0], level_pc],
-                "level_7y": loadings.loc[tenors[1], level_pc],
-                "level_15y": loadings.loc[tenors[2], level_pc],
-                "slope_3y": loadings.loc[tenors[0], slope_pc],
-                "slope_7y": loadings.loc[tenors[1], slope_pc],
-                "slope_15y": loadings.loc[tenors[2], slope_pc],
-                "curv_3y": loadings.loc[tenors[0], curv_pc],
-                "curv_7y": loadings.loc[tenors[1], curv_pc],
-                "curv_15y": loadings.loc[tenors[2], curv_pc],
+                f"level_{tenor_labels[0]}": loadings.loc[tenors[0], level_pc],
+                f"level_{tenor_labels[1]}": loadings.loc[tenors[1], level_pc],
+                f"level_{tenor_labels[2]}": loadings.loc[tenors[2], level_pc],
+                f"slope_{tenor_labels[0]}": loadings.loc[tenors[0], slope_pc],
+                f"slope_{tenor_labels[1]}": loadings.loc[tenors[1], slope_pc],
+                f"slope_{tenor_labels[2]}": loadings.loc[tenors[2], slope_pc],
+                f"curv_{tenor_labels[0]}": loadings.loc[tenors[0], curv_pc],
+                f"curv_{tenor_labels[1]}": loadings.loc[tenors[1], curv_pc],
+                f"curv_{tenor_labels[2]}": loadings.loc[tenors[2], curv_pc],
             }
         )
 

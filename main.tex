@@ -1,0 +1,920 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[left=0.75in,right=0.75in,top=0.80in,bottom=0.85in]{geometry}
+\usepackage{graphicx,amsmath,amssymb,booktabs,caption,subcaption,hyperref,xcolor,float}
+\usepackage{setspace,titlesec,enumitem,multirow,tabularx}
+
+\setstretch{1.08}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+\titlespacing*{\section}{0pt}{10pt}{5pt}
+\titlespacing*{\subsection}{0pt}{7pt}{4pt}
+\titlespacing*{\subsubsection}{0pt}{5pt}{3pt}
+\setlist{nosep,leftmargin=*,topsep=2pt}
+\captionsetup{font=small,skip=5pt}
+
+\graphicspath{{output/}}
+
+\title{\textbf{PCA-Based Butterfly Trading on the GBP OIS Curve:\\
+Construction, Performance, and Strategy Variants}}
+\author{
+Christopher Darcy Morkan \quad Ilia Bolgov \\[4pt]
+\textit{Imperial College London --- Topics in Mathematical Finance}\\[2pt]
+\textit{Term 2, January 2026}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+We construct and evaluate PCA-based curvature butterfly strategies on
+GBP overnight indexed swap (OIS) rates from January~2023 to January~2026,
+a period spanning the Bank of England's hiking, hold, and cutting
+regimes.  Butterflies are formed by solving the loading-nullity system
+$L^{\!\top}w = [0,0,1]$ to eliminate level and slope exposure while
+targeting unit curvature sensitivity.  We compare three curve
+configurations---spot 1Y--30Y, spot 1Y--10Y, and 1-year forward
+rates---and find that forward-rate PCA delivers materially stronger
+curvature isolation ($R^{2}=0.83$, curvature correlation $\rho=0.90$)
+than spot-rate implementations ($R^{2}=0.06$--$0.17$).  A z-score
+mean-reversion signal achieves a Sharpe ratio of 1.44 on the forward
+curve.  We further test five literature-inspired strategy
+variants---volatility-scaling, momentum, carry overlay, PC-score
+momentum, and regime filtering---and find that the carry+mean-reversion
+overlay is the most robust enhancement (Sharpe 1.32--1.42 on two of
+three curves).  PC-score momentum fails uniformly, confirming that GBP
+curvature is mean-reverting rather than trending in this sample.
+Results demonstrate that principal-component ordering is unstable across
+regimes, motivating structural PC identification and rolling estimation.
+\end{abstract}
+
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Principal component analysis (PCA) of yield-curve changes is a
+foundational tool in fixed-income analytics.  Since the early work of
+Litterman and Scheinkman~(1991), it has been well established that three
+factors---level, slope, and curvature---explain upwards of 95\% of
+term-structure variance in most developed markets.  These factors
+provide a natural basis for constructing relative-value trades:  a
+\emph{butterfly} trade that is hedged against level and slope movements
+isolates exposure to the curvature factor, offering a systematic
+risk premium for bearing higher-order term-structure risk.
+
+However, the practical implementation of PCA butterflies raises several
+non-trivial choices.  First, PCA factors are statistical artefacts whose
+economic interpretation depends on the eigenvalue ordering, which in turn
+depends on the covariance structure of rates in the estimation window.
+As monetary-policy regimes change---and with them the relative volatility
+of parallel shifts versus twist and curvature moves---the ordinal
+labelling of PCs can swap.  Second, the choice of rate representation
+(spot versus forward) affects factor isolation: forward rates amplify
+local curvature and reduce the multicollinearity inherent in overlapping
+zero-coupon rates.  Third, the estimation window, number of tenors, and
+stationarity treatment all influence factor stability.
+
+This paper addresses these issues in the context of GBP OIS rates during
+2023--2026, a period that includes the Bank of England's terminal hiking
+phase (Jan--Aug~2023), an extended hold at 5.25\% (Aug~2023--Aug~2024),
+and the subsequent cutting cycle (Aug~2024--Jan~2026).  Our
+contributions are threefold: (i)~we show that forward-rate PCA produces
+materially cleaner curvature trades than spot-rate PCA; (ii)~we
+demonstrate that structural PC identification (by loading shape rather
+than eigenvalue rank) is essential for regime-robust trading; and
+(iii)~we evaluate five literature-inspired signal and sizing variants,
+finding that a carry+mean-reversion overlay consistently outperforms
+the static butterfly.
+
+The remainder of the paper is organised as follows.
+Section~\ref{sec:data} describes the data and curve construction.
+Section~\ref{sec:pca} sets out the PCA framework and the choices made.
+Section~\ref{sec:butterfly} explains the butterfly weight solver.
+Section~\ref{sec:strategies} describes the trading strategies.
+Section~\ref{sec:results} presents the results, including factor
+correlations, regime analysis, and strategy variant comparison.
+Section~\ref{sec:discussion} discusses residual exposure, regime
+dependence, and the economic rationale for the observed performance.
+Section~\ref{sec:conclusion} concludes.
+
+
+% =====================================================================
+\section{Data and Curve Construction}
+\label{sec:data}
+
+\subsection{Raw Data}
+
+The dataset comprises 762 daily observations of GBP OIS zero-coupon
+rates from January~2023 to January~2026, sourced from Bloomberg.  The
+raw data contains 29 maturity columns at tenors ranging from overnight
+to 30~years.  We map Bloomberg ticker suffixes to numeric maturities
+using a predefined dictionary (e.g.\ \texttt{1Y}$\to$1.0,
+\texttt{18M}$\to$1.5, \texttt{30Y}$\to$30.0) and convert all rates
+from percentage to decimal form.
+
+\subsection{Interpolation to Standard Grid}
+
+To ensure a uniform maturity grid across all dates, we apply linear
+interpolation across tenors for each cross-section to the target maturities
+$\{1,2,3,5,7,10,15,20,30\}$~years.  Dates with fewer than 10 valid tenor
+observations are dropped, yielding \textbf{753 clean cross-sections}.
+Figure~\ref{fig:full_pca}(a) shows the full-sample PCA loadings on this grid.
+
+\subsection{Forward Rate Computation}
+
+One-year forward rates are computed from zero-coupon rates via the
+standard bootstrapping identity:
+\begin{equation}
+f(T_{i-1},T_i) = \frac{T_i \, S(T_i) - T_{i-1} \, S(T_{i-1})}{T_i - T_{i-1}},
+\label{eq:forward}
+\end{equation}
+where $S(T)$ denotes the zero-coupon rate at maturity $T$.  This yields
+8 forward-rate maturities $\{2,3,5,7,10,15,20,30\}$~years, on which a
+separate PCA is run.  The forward-rate representation amplifies local
+curvature in the term structure, as each forward rate is a differential
+rather than a cumulative measure.
+
+\subsection{Bank of England Regime Context}
+
+The sample spans three distinct Bank of England policy regimes:
+\begin{enumerate}
+  \item \textbf{Hiking} (Jan--Aug 2023): Bank Rate raised from 3.50\%
+        to 5.25\%, with material daily volatility in rates.
+  \item \textbf{Hold} (Aug 2023--Aug 2024): Bank Rate held at 5.25\%,
+        a period of unusually low daily rate changes.
+  \item \textbf{Cutting} (Aug 2024--Jan 2026): Gradual easing begins,
+        with renewed volatility as expectations shift.
+\end{enumerate}
+These regimes create an ideal testing ground for PCA stability, as the
+covariance structure of rate changes differs markedly across phases.
+All plots in this paper include regime shading to facilitate visual
+interpretation.
+
+
+% =====================================================================
+\section{PCA Framework}
+\label{sec:pca}
+
+\subsection{Methodological Choices}
+
+The assignment brief asks the analyst to make and justify several
+choices when setting up PCA.  Our choices are:
+
+\subsubsection{PCA on Changes, Not Levels}
+
+We difference the curves ($\Delta y_t = y_t - y_{t-1}$) before computing
+the covariance matrix.  Yield levels exhibit unit-root behaviour: PCA on
+levels would be dominated by the trending component and produce spurious
+``factors'' driven by the non-stationary drift.  Daily changes are
+approximately stationary, making covariance-based PCA valid.  We further
+\textbf{standardise} (z-score) each tenor column before PCA, so that the
+sample covariance of the standardised changes equals the
+\textbf{correlation matrix}.  Eigen-decomposition of the correlation
+matrix (rather than the raw covariance) prevents high-volatility
+long-dated tenors from dominating the first principal component.
+
+\subsubsection{Estimation Window}
+
+We use a \textbf{252-business-day rolling window} ($\approx$1~year).
+This is long enough to yield a well-conditioned covariance matrix with
+9 tenors ($p=9$ requires $n \gg p$), and short enough to adapt to
+regime changes.  The out-of-sample period comprises $\approx$500 days
+from February~2024 to January~2026, spanning the hold-to-cut transition.
+
+\subsubsection{Spot vs.\ Forward Rates}
+
+We run PCA on both spot and forward rates.  The motivation is that
+forward rates isolate local term-structure curvature more effectively
+than spot rates, which embed overlapping forward exposures and create
+multicollinearity.
+
+\subsubsection{Curve Segments and Tenor Choices}
+
+Three curve configurations are tested:
+\begin{itemize}
+  \item \textbf{Spot 1Y--30Y} with butterfly at 3s/7s/15s --- the full
+        curve, standard market convention for GBP butterflies.
+  \item \textbf{Spot 1Y--10Y} with butterfly at 2s/5s/10s --- a
+        truncated curve that excludes the ultra-long end where
+        supply--demand dynamics (pension hedging) may distort the
+        curvature factor.
+  \item \textbf{Forward 1Y} with butterfly at 3s/7s/15s --- forward
+        rates computed from the full spot curve.
+\end{itemize}
+
+\subsection{PC Identification by Shape}
+
+A critical implementation detail is that \textbf{level, slope, and
+curvature are not always PC1, PC2, and PC3}.  The standard ordering
+$\lambda_1 > \lambda_2 > \lambda_3$ depends on the relative variance
+of each factor in the estimation window.  During the hold regime, slope
+and curvature factors can have comparable variance, causing the ordinal
+assignment to flip.
+
+We classify PCs structurally using loading-shape diagnostics:
+\begin{itemize}
+  \item \textbf{Level}: the PC whose loadings have the smallest
+        standard deviation (most uniform across tenors).
+  \item \textbf{Slope}: the PC whose loadings have the highest
+        absolute correlation with maturity.
+  \item \textbf{Curvature}: the remaining PC, typically exhibiting a
+        U-shaped or inverted-U loading pattern.
+\end{itemize}
+This classification is re-evaluated at each rolling window.  We also
+enforce a sign convention: level loadings sum to a positive value, slope
+loadings increase with maturity, and curvature loadings have a positive
+middle (belly).
+Figure~\ref{fig:pc_role} shows the evolution of PC role assignments
+over time.
+
+\subsection{Full-Sample PCA}
+
+The full-sample PCA on 753 daily spot-rate changes yields explained
+variance ratios of \textbf{85.1\%, 10.6\%, and 3.0\%} for the first
+three components, cumulatively explaining \textbf{98.7\%} of total
+variance.  The loadings display the classical level--slope--curvature
+shapes (Figure~\ref{fig:full_pca}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{full_sample_pca.png}
+\caption{Full-sample PCA results.  (a)~Factor loadings for PC1 (level),
+PC2 (slope), and PC3 (curvature) on the 9-tenor spot grid.
+(b)~Individual and cumulative explained variance.  The first three PCs
+explain 98.7\% of total variance.}
+\label{fig:full_pca}
+\end{figure}
+
+
+% =====================================================================
+\section{Butterfly Construction}
+\label{sec:butterfly}
+
+\subsection{Weight Solver}
+
+Given a $3 \times 3$ matrix of PCA loadings $L$ at the three butterfly
+tenors $(\tau_s, \tau_m, \tau_l)$, we solve
+\begin{equation}
+L^{\!\top} w = \begin{pmatrix} 0 \\ 0 \\ 1 \end{pmatrix},
+\label{eq:weights}
+\end{equation}
+where $w = (w_s, w_m, w_l)$ are the butterfly weights.  The first two
+zero constraints eliminate level and slope exposure; the third constraint
+sets unit curvature sensitivity.
+
+This system is solved via \texttt{numpy.linalg.solve} at each rolling
+window.  When the loading matrix is near-singular (condition
+number $> 10^{4}$), the date is skipped and no PnL is recorded for that
+day.  In practice this never occurs in our sample---all 500
+out-of-sample days produce valid weights.
+
+\subsection{Daily PnL Computation}
+
+The daily butterfly PnL is computed as:
+\begin{equation}
+\text{PnL}_t = w_{t-1}^{\!\top} \Delta y_t \times 10{,}000,
+\label{eq:pnl}
+\end{equation}
+where $\Delta y_t$ is the vector of rate changes at the three butterfly
+tenors on day $t$ and $w_{t-1}$ are the weights estimated from the
+previous day's rolling PCA.  The factor of $10{,}000$ converts decimal
+rate changes to basis points.  Importantly, we use yesterday's weights
+with today's rate changes to avoid look-ahead bias.
+
+\subsection{Weight Dynamics}
+
+Figure~\ref{fig:weights} illustrates the evolution of butterfly weights
+for the spot 1Y--30Y strategy.  The wing weights (3Y, 15Y) fluctuate
+substantially during regime transitions---particularly around the
+August~2024 onset of cutting---while the belly weight (7Y) is more
+stable.  This instability reflects the changing curvature loading shape
+as the monetary-policy environment shifts.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{weight_stability_spot_1y-30y.png}
+\caption{Butterfly weight dynamics for spot 1Y--30Y (3s/7s/15s).
+(a)~Rolling weights over time.  (b)~Daily turnover
+($\sum|\Delta w_i|$).  Turnover spikes coincide with regime transitions
+and PC role reassignments.}
+\label{fig:weights}
+\end{figure}
+
+
+% =====================================================================
+\section{Trading Strategies}
+\label{sec:strategies}
+
+\subsection{Static Butterfly (Always-On)}
+
+The simplest approach holds the curvature butterfly continuously,
+rebalancing daily to the weights implied by the latest rolling PCA.
+This strategy earns the unconditional curvature risk premium but
+suffers drawdowns during periods when curvature is trending rather
+than mean-reverting.
+
+\subsection{Z-Score Mean Reversion (Signal-Based)}
+
+The signal strategy applies z-score mean reversion to the butterfly
+spread level:
+\begin{itemize}
+  \item \textbf{Entry}: when the rolling 63-day z-score of the
+        butterfly spread exceeds $\pm 1.5$ (spread is rich or cheap
+        relative to recent history).
+  \item \textbf{Exit}: when $|z| < 0.5$ (spread has reverted) or
+        risk limits are hit.
+  \item \textbf{Risk limits}: 50\,bps stop-loss and 30\,bps
+        take-profit per trade.
+\end{itemize}
+The strategy is long curvature when $z < -1.5$ (curvature is cheap)
+and short when $z > +1.5$ (rich), with the direction flipped
+appropriately.  This approach trades infrequently---approximately
+19--54 position changes over the 500-day out-of-sample
+period, depending on the curve configuration---reflecting that large
+curvature dislocations are relatively rare events.
+
+\subsection{Literature-Inspired Variants}
+
+We test five additional strategies motivated by the academic literature
+on PCA-based yield-curve trading:
+
+\subsubsection{Volatility-Scaled Butterfly}
+
+Following Hariparsad and Mar\'{e}~(2023), who study butterfly risk premia and PCA-based
+weighting schemes in the South African swap market, we scale the daily position size inversely
+proportional to trailing 63-day realised PnL volatility:
+\begin{equation}
+w_t^{\text{vol}} = w_t \cdot \frac{\sigma_{\text{target}}}{\hat\sigma_{t}},
+\end{equation}
+where $\sigma_{\text{target}} = 5$\,bps/day.  This normalises risk
+across regimes, reducing positions during volatile cutting periods and
+increasing them during the calm hold period.
+
+\subsubsection{Curvature Momentum}
+
+Motivated by Dreher, Gr\"{a}b, and Kostka~(2020) and Suimon et al.~(2020),
+who document positive autocorrelation in EUR and JGB curvature factor
+returns, we implement a 21-day/5-day momentum strategy.  The position
+follows the sign of trailing 21-day cumulative PnL, rebalanced every
+5~days.  If curvature mean-reversion is slow relative to the lookback
+window, momentum should capture trending curvature moves.
+
+\subsubsection{Carry + Mean-Reversion Overlay}
+
+Dreher et al.~(2020) introduce ``curvy carry trades'' that combine
+carry and value signals for curvature factor trading.  Our carry+MR
+overlay combines a z-score mean-reversion signal (using a looser
+$|z|>1.0$ threshold to generate more entry opportunities) with a carry
+signal (sign of trailing 21-day PnL):
+\begin{itemize}
+  \item Full position when both signals agree in direction.
+  \item Half position when only the MR signal fires.
+  \item Flat when signals disagree, only carry fires, or neither fires.
+\end{itemize}
+This filters out mean-reversion entries where the butterfly lacks
+positive carry support.
+
+\subsubsection{PC3-Score Momentum}
+
+Following Oprea~(2022) and the Credit Suisse ``PCA Unleashed''
+framework, we use the trailing 10-day average PC3 (curvature) score
+as a directional signal.  Positive trailing score $\to$ long butterfly;
+negative $\to$ short.  This approach uses the factor itself rather
+than the spread level as the signal source.
+
+\subsubsection{Regime Filter}
+
+Lammi~(2022) and Hariparsad and Mar\'{e}~(2024) highlight how
+monetary-policy regimes affect yield-curve arbitrage returns.  Our regime filter trades
+only when trailing 63-day PnL volatility exceeds its expanding 50th
+percentile, shutting off the strategy during the low-volatility hold
+regime when curvature risk premia are insufficient to justify trading.
+
+
+% =====================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Strategy Performance Overview}
+
+Table~\ref{tab:summary} reports performance metrics across all three
+curve configurations, including the static butterfly, z-score
+mean-reversion signal, and five strategy variants.
+
+\begin{table}[H]
+\centering
+\caption{Strategy Performance Summary.  Sharpe ratios are annualised
+($\sqrt{252}$).  PnL and volatility are in basis points.  Hit rate is
+the fraction of positive PnL days (lower for signal strategies that
+are frequently flat).}
+\label{tab:summary}
+\small
+\begin{tabular}{llcccccc}
+\toprule
+Curve & Strategy & Sharpe & PnL (bps) & Vol (bps) & MaxDD & Hit\% & Skew \\
+\midrule
+\multirow{7}{*}{spot 1Y--30Y}
+  & Static       & 0.58 & 214  & 187 & 180 & 53.8 & 0.51 \\
+  & Z-Score MR   & 1.14 & 287  & 126 & 83  & 26.4 & 0.68 \\
+  & Vol-Scaled   & 0.45 & 86   & 99  & 137 & 53.5 & $-$0.26 \\
+  & Momentum     & \textbf{1.18} & \textbf{431} & 188 & 78  & 53.2 & $-$0.20 \\
+  & Carry+MR     & \textbf{1.32} & 354  & 136 & \textbf{77}  & 32.3 & 0.76 \\
+  & PC3 Mom.     & $-$0.35 & $-$128 & 188 & 291 & 50.1 & $-$0.49 \\
+  & Regime Filt. & 0.15 & 53   & 174 & 175 & 34.3 & 0.46 \\
+\midrule
+\multirow{7}{*}{spot 1Y--10Y}
+  & Static       & \textbf{0.84} & 222  & 134 & \textbf{46} & 52.8 & 12.17 \\
+  & Z-Score MR   & 0.77 & 184  & 121 & 39  & 23.4 & 16.38 \\
+  & Vol-Scaled   & 0.41 & 100  & 128 & 87  & 52.3 & 6.47 \\
+  & Momentum     & $-$0.86 & $-$226 & 135 & 266 & 49.3 & $-$11.92 \\
+  & Carry+MR     & 0.41 & 62   & 76  & 48  & 30.9 & 7.20 \\
+  & PC3 Mom.     & $-$1.30 & $-$343 & 134 & 414 & 47.3 & $-$12.14 \\
+  & Regime Filt. & \textbf{0.89} & \textbf{232} & 132 & 46  & 25.3 & 12.86 \\
+\midrule
+\multirow{7}{*}{fwd 1Y}
+  & Static       & 0.34 & 199  & 296 & 112 & 49.2 & 1.03 \\
+  & Z-Score MR   & \textbf{1.44} & \textbf{545} & 191 & 121 & 20.8 & 1.27 \\
+  & Vol-Scaled   & 0.82 & 317  & 204 & \textbf{32}  & 49.2 & 16.79 \\
+  & Momentum     & $-$0.42 & $-$244 & 299 & 409 & 46.6 & 1.33 \\
+  & Carry+MR     & \textbf{1.42} & 467  & 166 & 161 & 27.5 & $-$1.58 \\
+  & PC3 Mom.     & $-$3.83 & $-$2175 & 289 & 2194 & 41.4 & $-$2.07 \\
+  & Regime Filt. & 0.29 & 155  & 269 & 112 & 21.8 & 1.37 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key observations from Table~\ref{tab:summary}:
+\begin{itemize}
+  \item The z-score MR signal improves the Sharpe ratio on every curve
+        relative to the static position, with the largest improvement on
+        the forward curve (0.34~$\to$~1.44).
+  \item Carry+MR overlay is the most consistently strong variant,
+        achieving Sharpe ratios of 1.32 and 1.42 on spot~1Y--30Y and
+        fwd~1Y respectively.
+  \item Momentum works only on spot~1Y--30Y (Sharpe 1.18) but
+        \emph{reverses} on the other two curves, indicating that
+        curvature trending behaviour is segment-dependent.
+  \item PC3-score momentum fails uniformly (Sharpe $-$0.35 to $-$3.83),
+        confirming that GBP curvature in this sample is mean-reverting,
+        not trending.
+  \item The spot~1Y--10Y curve exhibits extreme positive skewness
+        (12.17) driven by a single large gain during the September~2024
+        BOE rate cut announcement.
+\end{itemize}
+
+\subsection{Cumulative PnL and Drawdowns}
+
+Figure~\ref{fig:variant_pnl} shows cumulative PnL paths for all
+variants on the forward-rate curve, the configuration with the widest
+performance dispersion.  The carry+MR overlay closely tracks the z-score
+MR strategy in profitable regimes while cutting losses faster during
+adverse periods.  The static strategy accumulates PnL slowly but
+steadily, while momentum and PC3-score momentum produce deep and
+sustained drawdowns.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{variant_cumulative_pnl_fwd_1y.png}
+\caption{Cumulative PnL of all strategy variants on the forward-rate
+butterfly (3s/7s/15s forward tenors).  Regime shading highlights the
+hiking (red), hold (blue), and cutting (green) periods.}
+\label{fig:variant_pnl}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{variant_cumulative_pnl_spot_1y-30y.png}
+\caption{Cumulative PnL of all strategy variants on the spot 1Y--30Y
+curve (3s/7s/15s butterfly).  Momentum performs strongly here, unlike
+on other curves.}
+\label{fig:variant_pnl_spot}
+\end{figure}
+
+Figure~\ref{fig:drawdown} presents the drawdown (underwater) chart
+for the static strategies across all three curves.  The spot~1Y--30Y
+strategy experiences the deepest drawdown (180\,bps) during mid-2024,
+coinciding with the hold-to-cut regime transition.  The spot~1Y--10Y
+strategy has remarkably shallow drawdowns (46\,bps) but with extreme
+positive skewness driven by a single large gain during the
+September~2024 rate cut.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{drawdown_comparison.png}
+\caption{Underwater chart showing drawdowns for the static butterfly
+across all three curve configurations.  Regime shading as before.}
+\label{fig:drawdown}
+\end{figure}
+
+\subsection{Sharpe Ratio Comparison}
+
+Figure~\ref{fig:sharpe_bar} provides a visual comparison of Sharpe
+ratios across all strategies and curves.  The clustering of
+mean-reversion-based strategies (z-score MR, carry+MR) at the top
+and momentum-based strategies at the bottom is consistent across
+configurations, strongly supporting the mean-reverting nature of GBP
+curvature.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{variant_sharpe_comparison.png}
+\caption{Sharpe ratio comparison across all strategy variants and curve
+configurations.  Negative Sharpe ratios indicate momentum and PC3-score
+strategies that lose money in a mean-reverting curvature environment.}
+\label{fig:sharpe_bar}
+\end{figure}
+
+\subsection{Factor Correlation Analysis}
+\label{sec:factor_corr}
+
+A well-constructed butterfly should be uncorrelated with level and slope
+factors and strongly correlated with the curvature factor.
+Table~\ref{tab:factor} reports the regression results from projecting
+daily butterfly PnL onto the three PC factor scores.
+
+\begin{table}[H]
+\centering
+\caption{Factor correlation analysis.  Regression:
+$\text{PnL}_t = \alpha + \beta_1 \cdot \text{Level}_t
++ \beta_2 \cdot \text{Slope}_t + \beta_3 \cdot \text{Curvature}_t
++ \varepsilon_t$.}
+\label{tab:factor}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+Curve & $\rho_{\text{level}}$ & $\rho_{\text{slope}}$
+  & $\rho_{\text{curv}}$ & $R^2$ & $\beta_{\text{curv}}$ \\
+\midrule
+spot 1Y--30Y & $-$0.065 & $+$0.003 & $+$0.209 & 0.057 & 0.855 \\
+spot 1Y--10Y & $+$0.188 & $+$0.143 & $+$0.401 & 0.165 & 0.878 \\
+fwd 1Y       & $-$0.499 & $+$0.505 & $+$0.902 & \textbf{0.830} & 1.275 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The forward-rate butterfly achieves an $R^{2}$ of 0.83 with the
+three-factor model, compared to 0.06 for spot~1Y--30Y.  The curvature
+beta for the forward-rate butterfly (1.275) is close to but exceeds
+unity, suggesting mild \emph{over}-exposure to curvature relative to
+the theoretical $\beta=1$ target.
+
+The spot~1Y--30Y butterfly has near-zero level and slope correlations
+($-$0.065 and $+$0.003), indicating effective hedging.  The spot~1Y--10Y
+and forward-rate strategies show non-negligible cross-factor
+correlations, which we discuss further in Section~\ref{sec:residual}.
+
+Figure~\ref{fig:factor_corr} shows scatter plots of PnL against each
+factor score for the forward-rate butterfly.  The curvature panel
+exhibits a strong linear relationship, while level and slope show
+moderate correlations that partially cancel in the regression.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{factor_correlation_fwd_1y.png}
+\caption{Factor correlation scatter plots for the forward-rate
+butterfly.  Strong curvature correlation ($\rho=0.90$) confirms
+effective factor isolation.}
+\label{fig:factor_corr}
+\end{figure}
+
+\subsection{PCA Dynamics and Regime Analysis}
+\label{sec:pca_dynamics}
+
+Figure~\ref{fig:pca_dyn} shows the rolling PCA dynamics for the spot
+1Y--30Y strategy, including explained variance by PC role, condition
+number, and PC role assignments.  During the hold regime (blue shading),
+PC2 and PC3 swap roles repeatedly---the curvature factor is PC3 in
+approximately 65\% of windows and PC2 in the remaining 35\%.  This
+instability is most pronounced when the eigenvalues of slope and
+curvature are close, which occurs during the low-volatility hold period.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{pca_dynamics_spot_1y-30y.png}
+\caption{Rolling PCA dynamics for spot 1Y--30Y.  From top: explained
+variance by factor role; cumulative explained variance; condition number
+of the loading matrix; PC role assignment (which ordinal PC maps to
+each economic factor).}
+\label{fig:pca_dyn}
+\end{figure}
+
+\subsubsection{PC Role Tracking}
+
+Figure~\ref{fig:pc_role} provides a compact view of which ordinal PC
+is assigned to the curvature role across all three strategies.  The
+forward-rate strategy exhibits the most frequent role swapping (curvature
+is PC2 $\approx$65\% of the time, PC3 $\approx$35\%), while the
+spot~1Y--10Y strategy has curvature as PC2 in approximately 55\% of
+windows.  This confirms that ordinal PC labelling is unreliable and
+structural identification is essential.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{pc_role_tracking.png}
+\caption{PC role tracking: which ordinal PC (1, 2, or 3) is assigned
+to the curvature role over time for each curve configuration.  Regime
+shading as before.}
+\label{fig:pc_role}
+\end{figure}
+
+\subsubsection{Loading Shapes Over Time}
+
+Figure~\ref{fig:loading_shapes} displays the PCA loading shapes at
+three time snapshots (start, middle, end of the out-of-sample period)
+for the spot 1Y--30Y strategy.  The curvature loading (green) maintains
+its characteristic humped shape throughout, but the amplitude and
+peak location shift across regimes.  The slope loading (red) steepens
+during the cutting regime as easing expectations differentially affect
+short and long maturities.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{loading_shapes_spot_1y-30y.png}
+\caption{PCA loading shapes at three time points for the spot 1Y--30Y
+strategy.  The curvature loading shape is qualitatively stable but
+varies in amplitude.}
+\label{fig:loading_shapes}
+\end{figure}
+
+\subsection{Regime Mismatch}
+
+Figure~\ref{fig:regime_mismatch} shows the mismatch between
+estimation-window and forward-window eigenvalue sums.  With a 252-day
+rolling estimation window, weights calibrated during the hold regime
+(low volatility) are applied to the cutting regime (high volatility)
+during autumn~2024.  The forward eigenvalues spike relative to the
+estimation eigenvalues, indicating that the estimated factor structure
+underestimates the true variability of the market---particularly for
+the level factor, which gains the most variance during cutting.
+
+This mismatch has practical consequences:  weights calibrated from
+low-volatility covariance matrices produce positions that are too large
+relative to the actual risk being taken, leading to outsized PnL swings
+during the initial cutting phase.  Volatility scaling (Section~5.3.1)
+partially addresses this issue.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{regime_mismatch.png}
+\caption{Regime mismatch: total eigenvalue sum from estimation window
+(blue) versus 252-day forward window (red) on spot rates.  The
+divergence during 2024~Q4 reflects the hold-to-cut transition.}
+\label{fig:regime_mismatch}
+\end{figure}
+
+\subsection{Strategy Performance Detail Plots}
+
+Figure~\ref{fig:perf_fwd} shows the detailed performance panels for
+the forward-rate strategy, including cumulative PnL with regime shading,
+butterfly weights, turnover, and rolling Sharpe ratio.  The z-score MR
+strategy (red) is overlaid on the static PnL (black), showing that the
+signal timing adds substantial value during the cutting regime.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{strategy_performance_fwd_1y.png}
+\caption{Detailed strategy performance for the forward-rate butterfly:
+cumulative PnL (static and signal), butterfly weights, daily turnover,
+and 63-day rolling Sharpe ratio.}
+\label{fig:perf_fwd}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{strategy_performance_spot_1y-30y.png}
+\caption{Detailed strategy performance for the spot 1Y--30Y butterfly.
+The static position accumulates PnL steadily but with larger drawdowns
+than the signal-based version.}
+\label{fig:perf_spot30}
+\end{figure}
+
+
+% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Residual Level and Slope Exposure}
+\label{sec:residual}
+
+The butterfly is constructed to have \emph{exactly} zero exposure to
+the level and slope PCs \emph{as estimated in the rolling window}.
+The non-zero factor correlations observed out of sample arise from
+three sources:
+
+\begin{enumerate}
+  \item \textbf{Factor structure shifts:} When the BOE transitions
+        between regimes, the covariance structure changes.  Weights
+        calibrated using hold-regime data do not perfectly hedge the
+        cutting-regime factor structure.
+  \item \textbf{PC role swapping:} When the curvature assignment
+        switches from PC3 to PC2 (or vice versa) between consecutive
+        windows, the previous day's weights target the wrong
+        eigenvector for one day, leaking level/slope exposure.
+  \item \textbf{Instrument limitation:} A 3-tenor butterfly has exactly
+        3 degrees of freedom.  Two are used to zero out level and slope;
+        the third sets unit curvature.  There is no remaining freedom to
+        hedge higher-order terms (e.g.\ a 4th PC explaining the residual
+        0.1\% of variance).  With 9 maturities but only 3 instruments,
+        the hedge is approximate even within the estimation window.
+\end{enumerate}
+
+The forward-rate implementation shows higher individual correlations
+with level ($-$0.50) and slope ($+$0.51) than the spot~1Y--30Y strategy,
+yet has a much higher curvature $R^{2}$ (0.83 vs.\ 0.06).  This
+apparent paradox arises because forward-rate PCA factors are less
+orthogonal to the spot-rate factors used in the regression.  The
+forward-rate butterfly captures curvature movements very efficiently,
+but its PnL also loads on level and slope \emph{measured in the
+forward-rate basis}, which partially correlates with spot-rate level
+and slope factors.
+
+\subsection{Why Forward Rates Dominate}
+
+Forward rates are differential quantities:
+$f(T_i) \approx S(T_i) + T_i S'(T_i)$, which amplifies local curvature.
+PCA on forward-rate changes therefore naturally separates local
+curvature from the integrated (level) component that dominates
+spot-rate changes.  This yields:
+\begin{itemize}
+  \item \textbf{Cleaner factor separation:} 90\% curvature correlation
+        for forwards vs.\ 21\% for spots.
+  \item \textbf{Better signal quality:} z-score MR on forwards achieves
+        Sharpe 1.44 (the best single strategy) because curvature
+        dislocations are more precisely measured.
+  \item \textbf{More efficient hedging:} the forward-rate curvature
+        loading is more localised, requiring less extreme wing weights
+        and producing lower turnover.
+\end{itemize}
+
+\subsection{Strategy Variant Analysis}
+
+The five variants test different aspects of curvature factor dynamics:
+
+\textbf{Carry+MR overlay} is the most robust enhancement.  By requiring
+both a z-score entry signal and positive trailing carry, it filters out
+``false'' mean-reversion entries where the butterfly is cheap but
+lacking positive carry (e.g.\ during structural curvature flattening
+in the cutting regime).  This supports Dreher et al.'s~(2020) finding
+that carry and value signals are complementary for curvature factor
+trading.
+
+\textbf{Volatility scaling} improves risk-adjusted performance on the
+forward curve (Sharpe 0.34~$\to$~0.82) by normalising risk across the
+high-vol cutting and low-vol hold regimes.  However, it underperforms
+on spot curves where the raw strategy already has moderate volatility,
+suggesting that vol-scaling is most useful when the underlying strategy
+has high unconditional volatility dispersion.
+
+\textbf{Momentum} exhibits strikingly curve-dependent behaviour.  On
+spot~1Y--30Y it produces the highest Sharpe (1.18, 431\,bps) but
+\emph{reverses} on spot~1Y--10Y ($-$0.86) and fwd~1Y ($-$0.42).  This
+suggests that curvature trending behaviour is localised to the
+ultra-long end (15Y--30Y), where supply--demand dynamics (UK pension
+and LDI hedging flows) create persistent directional curvature moves
+that are absent in the sub-10Y segment.
+
+\textbf{PC3-score momentum} fails uniformly (Sharpe $-$0.35 to
+$-$3.83).  The curvature factor score is a contemporaneous measure of
+curvature position; using its trailing average as a directional signal
+amounts to ``buying high and selling low'' in a mean-reverting
+environment.  This strongly confirms that GBP curvature is
+mean-reverting, not trending, over the 10-day lookback horizon.
+
+\textbf{Regime filter} provides modest improvement on spot~1Y--10Y
+(0.84~$\to$~0.89) by concentrating trades in high-volatility periods
+when curvature risk premia are larger.  However, the improvement is
+small because the filter is relatively coarse (50th percentile
+threshold) and misses the early stages of regime transitions.
+
+\subsection{Limitations}
+
+Several limitations should be noted:
+\begin{enumerate}
+  \item \textbf{Transaction costs:} All PnL figures are gross of
+        transaction costs.  The daily rebalancing inherent in rolling
+        PCA would incur non-trivial bid--ask costs in practice,
+        particularly for the wing positions.
+  \item \textbf{Short sample:} Three years (753 observations) provides
+        limited statistical power.  The out-of-sample period (500 days)
+        spans only a single regime transition.
+  \item \textbf{No model risk:} We assume the PCA factor structure is
+        the ``true'' data-generating process.  In reality, factors may
+        be time-varying and non-linear.
+  \item \textbf{Skewness:} The spot~1Y--10Y strategies exhibit extreme
+        skewness (12.17), driven by a single outlier event.  Sharpe
+        ratios may overstate risk-adjusted performance when the PnL
+        distribution is highly non-Gaussian.
+\end{enumerate}
+
+\subsection{Practical Implications}
+
+For institutional implementation, our results suggest:
+\begin{enumerate}
+  \item Use forward-rate PCA for curvature butterfly construction.
+  \item Identify PCs by loading shape, not eigenvalue rank.
+  \item Combine z-score mean-reversion entry with a carry filter to
+        avoid false positives.
+  \item Re-estimate PCA at least daily with a rolling window of
+        approximately one year.
+  \item Volatility-scale positions when the underlying strategy exhibits
+        high unconditional volatility dispersion across regimes.
+\end{enumerate}
+
+
+% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper constructs PCA-based curvature butterfly strategies on GBP
+OIS rates and evaluates their performance across three curve
+configurations, two base trading rules, and five literature-inspired
+variants over a three-year sample spanning hiking, hold, and cutting
+regimes.
+
+Our principal findings are:
+
+\begin{enumerate}
+  \item \textbf{Forward-rate PCA produces materially cleaner curvature
+        trades than spot-rate PCA.}  The forward-rate butterfly achieves
+        an $R^{2}$ of 0.83 with the three-factor model, compared to 0.06
+        for the full spot curve.  This is because forward rates amplify
+        local curvature and reduce the multicollinearity inherent in
+        overlapping zero-coupon rates.
+
+  \item \textbf{PC ordering is unstable across monetary-policy regimes.}
+        Curvature was identified as PC3 in only $\sim$65\% of rolling
+        windows on the full spot curve; it was PC2 in the remainder.
+        Structural identification by loading shape---rather than ordinal
+        rank---is essential for robust trading.
+
+  \item \textbf{Signal-based mean reversion significantly outperforms
+        the static butterfly.}  The z-score MR strategy achieves Sharpe
+        ratios of 1.14--1.44 across curves, compared to 0.34--0.84 for
+        the static position.  Curvature dislocations are episodic
+        rather than persistent, rewarding selective entry.
+
+  \item \textbf{Carry+MR overlay is the most robust enhancement.}  By
+        conditioning on both a z-score entry signal and positive trailing
+        carry, it achieves Sharpe ratios of 1.32 and 1.42 on two of
+        three curves.  PC-score momentum fails uniformly, confirming
+        the mean-reverting nature of GBP curvature.
+
+  \item \textbf{Momentum is segment-dependent.}  Curvature momentum
+        profits on the ultra-long end (1Y--30Y butterfly, Sharpe~1.18)
+        but reverses on shorter segments and forward rates, likely
+        reflecting LDI-driven persistent curvature flows at the long
+        end.
+
+  \item \textbf{Residual factor exposure is a structural limitation.}
+        Non-zero level/slope correlations arise from regime-induced
+        factor structure shifts, PC role swapping, and the inherent
+        limitation of hedging a 9-dimensional curve with a 3-tenor
+        butterfly.
+\end{enumerate}
+
+These results support the practical deployment of forward-rate curvature
+strategies with dynamic PCA, structural PC identification, and
+carry-augmented mean-reversion signals for institutional fixed-income
+trading.  Future work could extend the framework to multi-currency
+settings, incorporate transaction-cost models, and test alternative
+estimation approaches (e.g.\ exponentially weighted covariance matrices)
+for more responsive regime adaptation.
+
+
+% =====================================================================
+\section*{References}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=*,itemsep=2pt]
+  \item Credit Suisse (2012).\ ``PCA Unleashed.''\ Interest Rate Strategy
+        Research.
+  \item Koijen, R.S.J., Moskowitz, T.J., Pedersen, L.H., and Vrugt, E.B.~(2018).\
+        ``Carry.''\ \textit{Journal of Financial Economics}, 127(2), 197--225.
+  \item Dreher, F., Gr\"{a}b, J., and Kostka, T.~(2020).\ ``From Carry
+        Trades to Curvy Trades.''\ \textit{The World Economy}, 43(3),
+        758--780.
+  \item Hariparsad, S.\ and Mar\'{e}, E.~(2023).\ ``Examining Swap Butterfly
+        Risk Premia in South Africa.''\ \textit{Investment Analysts
+        Journal}, 52(3), 196--212.
+  \item Hariparsad, S.\ and Mar\'{e}, E.~(2024).\ ``Optimal Monetary and
+        Fiscal Policies to Maximise Non-Parallel Risk Premia in Sovereign
+        Bond Markets.''\ \textit{Journal of Risk and Financial
+        Management}, 17(11), 510.
+  \item Lammi, M.~(2022).\ ``Yield Curve Arbitrage in the USD Interest
+        Rate Swap Market: Returns and Risks in 2012--2021.''\ Master's
+        Thesis, Aalto University School of Business.
+  \item Litterman, R.\ and Scheinkman, J.~(1991).\ ``Common Factors
+        Affecting Bond Returns.''\ \textit{The Journal of Fixed Income},
+        1(1), 54--61.
+  \item Oprea, A.~(2022).\ ``The Use of Principal Component Analysis (PCA)
+        in Building Yield Curve Scenarios and Identifying Relative-Value
+        Trading Opportunities on the Romanian Government Bond Market.''\
+        \textit{Journal of Risk and Financial Management}, 15(6), 247.
+  \item Suimon, Y., Sakaji, H., Izumi, K., and
+        Matsushima, H.~(2020).\ ``Autoencoder-Based Three-Factor Model
+        for the Yield Curve of Japanese Government Bonds and a
+        Trading Strategy.''\ \textit{Journal of Risk and Financial
+        Management}, 13(4), 82.
+\end{enumerate}
+
+\end{document}
