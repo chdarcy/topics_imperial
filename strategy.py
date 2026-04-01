@@ -1,15 +1,5 @@
-"""Rolling-window PCA butterfly strategy on yield curves.
-
-Constructs a 3-tenor butterfly that neutralises level and slope PCs
-while maintaining unit exposure to the curvature PC.  PCs are identified
-by their loading shape (not assumed to be in order).  Weights are
-re-estimated each day using a rolling estimation window.
-"""
 from __future__ import annotations
-
 import warnings
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
@@ -32,23 +22,10 @@ def identify_pcs(loadings: pd.DataFrame) -> dict[str, str]:
     pc_cols = list(loadings.columns)
 
     # Score each PC for "level-ness": how uniform are the loadings?
-    # Use coefficient of variation: lower = more uniform = more level-like
-    level_scores = {}
-    for pc in pc_cols:
-        v = loadings[pc].values
-        mean_abs = np.abs(v).mean()
-        if mean_abs < 1e-12:
-            level_scores[pc] = 999.0  # degenerate
-        else:
-            level_scores[pc] = np.std(np.abs(v)) / mean_abs
+    level_scores = {pc: np.std(np.abs(loadings[pc].values)) / np.abs(loadings[pc].values).mean() for pc in pc_cols}
 
     # Score each PC for "slope-ness": correlation with maturity
-    slope_scores = {}
-    for pc in pc_cols:
-        v = loadings[pc].values
-        with np.errstate(invalid="ignore"):
-            corr = np.corrcoef(v, mats)[0, 1]
-        slope_scores[pc] = abs(corr) if not np.isnan(corr) else 0.0
+    slope_scores = {pc: abs(np.corrcoef(loadings[pc].values, mats)[0, 1]) for pc in pc_cols}
 
     assignment: dict[str, str] = {}
 
@@ -105,42 +82,17 @@ def _enforce_sign_convention(
 def solve_butterfly_weights(
     loadings: pd.DataFrame,
     pc_roles: dict[str, str],
-    tenors: tuple[float, float, float] = (3.0, 7.0, 15.0),
+    tenors: tuple[float, float, float],
 ) -> np.ndarray | None:
-    """Solve the 3x3 system for butterfly weights.
 
-    Given PCA loadings and their role assignments, find weights
-    w = [w_short, w_belly, w_long] such that the portfolio has zero
-    exposure to level and slope PCs, and unit exposure to curvature.
-
-    Returns None if the system is singular or ill-conditioned.
-    """
     # Order columns as [level, slope, curvature]
     role_to_pc = {v: k for k, v in pc_roles.items()}
-    ordered_cols = []
-    for role in ("level", "slope", "curvature"):
-        if role not in role_to_pc:
-            return None
-        ordered_cols.append(role_to_pc[role])
-
+    ordered_cols = [role_to_pc[role] for role in ("level", "slope", "curvature")]
     tenor_list = list(tenors)
-
     # L is (3 tenors x 3 PCs) in order [level, slope, curvature]
     L = loadings.loc[tenor_list, ordered_cols].values.astype(float)
-
-    cond = np.linalg.cond(L)
-    if cond > 1e4:
-        warnings.warn(f"Loading matrix poorly conditioned (cond={cond:.1e})")
-        return None
-
-    # b = [0, 0, 1]: zero level, zero slope, unit curvature
     b = np.array([0.0, 0.0, 1.0])
-
-    try:
-        w = np.linalg.solve(L.T, b)
-    except np.linalg.LinAlgError:
-        return None
-
+    w = np.linalg.solve(L.T, b)
     return w
 
 
@@ -191,7 +143,6 @@ def apply_trading_signals(
     trade_pnl = pd.Series(0.0, index=strategy_results["daily_pnl"].index)
     raw_pnl = strategy_results["daily_pnl"]
 
-    cumulative_trade_pnl = 0.0
     entry_pnl = 0.0  # cumulative PnL since last entry
 
     dates = weights.index.tolist()
