@@ -1,6 +1,5 @@
 from pathlib import Path
 import pandas as pd
-import numpy as np
 
 from data_loader import DataLoader
 from curves import interpolate_to_grid, compute_forward_rates
@@ -43,9 +42,6 @@ def run_strategy(curves, label, base, tenors, window=252):
 	# Rolling PCA butterfly (static, always-on)
 	strategy = rolling_pca_butterfly(curves, window=window, tenors=tenors, n_components=3)
 
-	if len(strategy["daily_pnl"]) == 0:
-		print("  No trading days produced — skipping.")
-		return None
 
 	print(f"  Out-of-sample days: {len(strategy['daily_pnl'])}")
 	print(f"  Date range: {strategy['daily_pnl'].index[0].date()} to "
@@ -53,9 +49,8 @@ def run_strategy(curves, label, base, tenors, window=252):
 
 	# PC role tracking
 	diag = strategy["diagnostics"]
-	if "curvature_pc" in diag.columns:
-		role_counts = diag["curvature_pc"].value_counts()
-		print(f"  Curvature was identified as: {dict(role_counts)}")
+	role_counts = diag["curvature_pc"].value_counts()
+	print(f"  Curvature was identified as: {dict(role_counts)}")
 
 	# Static strategy metrics
 	print("\n  --- Static (always-on) strategy ---")
@@ -69,15 +64,12 @@ def run_strategy(curves, label, base, tenors, window=252):
 		stop_loss_bps=50.0, take_profit_bps=30.0,
 	)
 
-	metrics_signal = {}
 	sig_pnl = strategy["signal_daily_pnl"]
-	sig_pnl_nonzero = sig_pnl[sig_pnl != 0]
-	if len(sig_pnl_nonzero) > 10:
-		print("\n  --- Signal-based strategy (z-score mean reversion) ---")
-		metrics_signal = compute_performance_metrics(sig_pnl)
-		print_metrics(metrics_signal)
-		n_trades = (strategy["signal_position"].diff().abs() > 0).sum()
-		print(f"  Number of position changes: {n_trades}")
+	print("\n  --- Signal-based strategy (z-score mean reversion) ---")
+	metrics_signal = compute_performance_metrics(sig_pnl)
+	print_metrics(metrics_signal)
+	n_trades = (strategy["signal_position"].diff().abs() > 0).sum()
+	print(f"  Number of position changes: {n_trades}")
 
 	# ── Strategy variants ──────────────────────────────────────────
 	variant_metrics = {}
@@ -86,56 +78,48 @@ def run_strategy(curves, label, base, tenors, window=252):
 	print("\n  --- Variant: Vol-scaled ---")
 	vs = apply_vol_scaling(strategy, vol_window=63, vol_target_bps=5.0)
 	m_vs = compute_performance_metrics(vs["variant_daily_pnl"])
-	if m_vs:
-		print_metrics(m_vs)
-		variant_metrics["vol_scaled"] = m_vs
+	print_metrics(m_vs)
+	variant_metrics["vol_scaled"] = m_vs
 
 	# Variant 2: Curvature momentum
 	print("\n  --- Variant: Momentum (21d/5d) ---")
 	mom = apply_momentum_signal(strategy, lookback=21, holding_period=5)
 	m_mom = compute_performance_metrics(mom["variant_daily_pnl"])
-	if m_mom:
-		print_metrics(m_mom)
-		variant_metrics["momentum"] = m_mom
+	print_metrics(m_mom)
+	variant_metrics["momentum"] = m_mom
 
 	# Variant 3: Carry + mean-reversion overlay
 	print("\n  --- Variant: Carry + MR overlay ---")
 	carry = apply_carry_overlay(strategy, curves, tenors=tenors)
 	m_carry = compute_performance_metrics(carry["variant_daily_pnl"])
-	if m_carry:
-		print_metrics(m_carry)
-		variant_metrics["carry_mr"] = m_carry
+	print_metrics(m_carry)
+	variant_metrics["carry_mr"] = m_carry
 
 	# Variant 4: PC score momentum
 	print("\n  --- Variant: PC3 score momentum ---")
 	pc_mom = apply_pc_score_momentum(strategy, lookback=10)
 	m_pc = compute_performance_metrics(pc_mom["variant_daily_pnl"])
-	if m_pc:
-		print_metrics(m_pc)
-		variant_metrics["pc_score_mom"] = m_pc
+	print_metrics(m_pc)
+	variant_metrics["pc_score_mom"] = m_pc
 
 	# Variant 5: Regime filter
 	print("\n  --- Variant: Regime filter (vol > 50th pct) ---")
 	reg = apply_regime_filter(strategy, vol_window=63, vol_threshold_pct=50.0)
 	m_reg = compute_performance_metrics(reg["variant_daily_pnl"])
-	if m_reg:
-		print_metrics(m_reg)
-		variant_metrics["regime_filter"] = m_reg
+	print_metrics(m_reg)
+	variant_metrics["regime_filter"] = m_reg
 
 	# Factor correlation analysis
-	corr_result = {}
-	pc_scores = strategy.get("pc_scores", pd.DataFrame())
-	if not pc_scores.empty:
-		print("\n  --- Factor Correlation Analysis ---")
-		corr_result = factor_correlation_analysis(strategy["daily_pnl"], pc_scores)
-		if "error" not in corr_result:
-			print(f"  Correlations:")
-			for k, v in corr_result["correlations"].items():
-				print(f"    {k:20s}: {v:+.4f}")
-			print(f"  Regression R²:      {corr_result['r_squared']:.4f}")
-			print(f"  Betas:")
-			for k, v in corr_result["betas"].items():
-				print(f"    {k:20s}: {v:+.4f}")
+	pc_scores = strategy["pc_scores"]
+	print("\n  --- Factor Correlation Analysis ---")
+	corr_result = factor_correlation_analysis(strategy["daily_pnl"], pc_scores)
+	print(f"  Correlations:")
+	for k, v in corr_result["correlations"].items():
+		print(f"    {k:20s}: {v:+.4f}")
+	print(f"  Regression R²:      {corr_result['r_squared']:.4f}")
+	print(f"  Betas:")
+	for k, v in corr_result["betas"].items():
+		print(f"    {k:20s}: {v:+.4f}")
 
 	# Trade log
 	trade_log = generate_trade_log(strategy["weights"], strategy["daily_pnl"])
@@ -276,7 +260,7 @@ def main():
 			"spot_1y-10y": (interp_10y, (2.0, 5.0, 10.0)),
 		}
 		if fwd_curves.shape[1] >= 3:
-			curves_map["fwd_1y"] = (fwd_curves, fwd_tenors)
+			curves_map["fwd_1y"] = (fwd_curves, (3.0, 7.0, 15.0))
 
 		for r in all_results:
 			lbl = r["label"]

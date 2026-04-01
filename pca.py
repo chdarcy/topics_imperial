@@ -17,11 +17,8 @@ def pca_on_curves(
     diffs = curves.diff().dropna(how="all")
     diffs = diffs.dropna(axis=0, how="any")
 
-    means = diffs.mean(axis=0)
-    stds = diffs.std(axis=0, ddof=1)
-
     X = diffs.values
-    X_centered = (X - means.values) / stds.values
+    X_centered = (X - diffs.mean(axis=0).values) / diffs.std(axis=0, ddof=1).values
 
     cov = np.cov(X_centered, rowvar=False, bias=False)
     eigvals, eigvecs = np.linalg.eigh(cov)
@@ -47,8 +44,6 @@ def pca_on_curves(
         "scores": scores,
         "eigenvalues": eigvals,
         "explained_variance_ratio": explained_variance_ratio,
-        "means": means,
-        "stds": stds,
     }
 
 
