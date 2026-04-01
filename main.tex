@@ -81,7 +81,7 @@ contributions are threefold: (i)~we show that forward-rate PCA produces
 materially cleaner curvature trades than spot-rate PCA; (ii)~we
 demonstrate that structural PC identification (by loading shape rather
 than eigenvalue rank) is essential for regime-robust trading; and
-(iii)~we evaluate five literature-inspired signal and sizing variants,
+(iii)~we evaluate three literature-inspired signal and sizing variants,
 finding that a carry+mean-reversion overlay consistently outperforms
 the static butterfly.
 
@@ -334,7 +334,7 @@ curvature dislocations are relatively rare events.
 
 \subsection{Literature-Inspired Variants}
 
-We test five additional strategies motivated by the academic literature
+We test three literature-inspired strategies motivated by the academic literature
 on PCA-based yield-curve trading:
 
 \subsubsection{Volatility-Scaled Butterfly}
@@ -382,7 +382,7 @@ positive carry support.
 
 Table~\ref{tab:summary} reports performance metrics across all three
 curve configurations, including the static butterfly, z-score
-mean-reversion signal, and five strategy variants.
+mean-reversion signal, and three strategy variants.
 
 \begin{table}[H]
 \centering
@@ -443,8 +443,7 @@ variants on the forward-rate curve, the configuration with the widest
 performance dispersion.  The carry+MR overlay closely tracks the z-score
 MR strategy in profitable regimes while cutting losses faster during
 adverse periods.  The static strategy accumulates PnL slowly but
-steadily, while momentum and PC3-score momentum produce deep and
-sustained drawdowns.
+steadily, while momentum produces deep and sustained drawdowns.
 
 \begin{figure}[H]
 \centering
@@ -685,7 +684,7 @@ spot-rate changes.  This yields:
 
 \subsection{Strategy Variant Analysis}
 
-The five variants test different aspects of curvature factor dynamics:
+The three variants test different aspects of curvature factor dynamics:
 
 \textbf{Carry+MR overlay} is the most robust enhancement.  By requiring
 both a z-score entry signal and positive trailing carry, it filters out
@@ -737,7 +736,7 @@ Several limitations should be noted:
 
 This paper constructs PCA-based curvature butterfly strategies on GBP
 OIS rates and evaluates their performance across three curve
-configurations, two base trading rules, and five literature-inspired
+configurations, two base trading rules, and three literature-inspired
 variants over a three-year sample spanning hiking, hold, and cutting
 regimes.
 
