@@ -467,125 +467,64 @@ def rolling_pca_butterfly(
     loadings_samples: dict[pd.Timestamp, pd.DataFrame] = {}
     diag_records: list[dict] = []
 
-    skipped = 0
-
     for i in range(window, n - 1):
         window_curves = curves.iloc[i - window: i + 1]
-
-        try:
-            res = pca_on_curves(
-                window_curves, n_components=n_components)
-        except ValueError:
-            skipped += 1
-            continue
-
+        res = pca_on_curves(window_curves, n_components=n_components)
         loadings = res["loadings"]
-        scores = res["scores"]
-
-        # Identify which PC is level, slope, curvature
         pc_roles = identify_pcs(loadings)
-        if "curvature" not in pc_roles.values():
-            skipped += 1
-            continue
-
         loadings = _enforce_sign_convention(loadings, pc_roles)
-
-        # Check that all butterfly tenors are in the loadings index
-        if not all(t in loadings.index for t in tenor_list):
-            skipped += 1
-            continue
-
         w = solve_butterfly_weights(loadings, pc_roles=pc_roles, tenors=tenors)
-        if w is None:
-            skipped += 1
-            continue
-
         trade_date = dates[i]
         pnl_date = dates[i + 1]
-
-        # Daily rate change at butterfly tenors
         delta = curves.loc[pnl_date, tenor_list] - curves.loc[trade_date, tenor_list]
-        if delta.isna().any():
-            skipped += 1
-            continue
-
         daily_pnl = float(np.dot(w, delta.values)) * pnl_scale
-
         w_keys = [f"w_{t:g}" for t in tenors]
-        weights_records.append(
-            {"date": trade_date, **dict(zip(w_keys, w))}
-        )
+        weights_records.append({"date": trade_date, **dict(zip(w_keys, w))})
         pnl_records.append({"date": pnl_date, "daily_pnl": daily_pnl})
-
-        # Store the last day's PC scores for factor correlation analysis
-        # Project the pnl_date's rate change onto the full loading vectors
         role_to_pc = {v: k for k, v in pc_roles.items()}
-        if pnl_date in curves.index and trade_date in curves.index:
-            full_delta = (curves.loc[pnl_date] - curves.loc[trade_date]).values
-            # Only use maturities present in loadings
-            common_mats = [m for m in curves.columns if m in loadings.index]
-            if len(common_mats) == len(loadings.index):
-                full_delta_aligned = (
-                    curves.loc[pnl_date, common_mats] - curves.loc[trade_date, common_mats]
-                ).values * pnl_scale
-                level_pc = role_to_pc.get("level", "PC1")
-                slope_pc = role_to_pc.get("slope", "PC2")
-                curv_pc = role_to_pc.get("curvature", "PC3")
-                score_records.append({
-                    "date": pnl_date,
-                    "level_score": float(full_delta_aligned @ loadings[level_pc].values),
-                    "slope_score": float(full_delta_aligned @ loadings[slope_pc].values),
-                    "curvature_score": float(full_delta_aligned @ loadings[curv_pc].values),
-                })
-
-        # Store loadings periodically (every 21 biz days ~ monthly)
-        if len(loadings_samples) == 0 or (i - window) % 21 == 0:
-            loadings_samples[trade_date] = loadings
-
-        # Diagnostics
-        L_sub = loadings.loc[tenor_list].values.astype(float)
-        cond = np.linalg.cond(L_sub)
-
-        role_to_pc = {v: k for k, v in pc_roles.items()}
+        common_mats = [m for m in curves.columns if m in loadings.index]
+        full_delta_aligned = (
+            curves.loc[pnl_date, common_mats] - curves.loc[trade_date, common_mats]
+        ).values * pnl_scale
         level_pc = role_to_pc.get("level", "PC1")
         slope_pc = role_to_pc.get("slope", "PC2")
         curv_pc = role_to_pc.get("curvature", "PC3")
-
+        score_records.append({
+            "date": pnl_date,
+            "level_score": float(full_delta_aligned @ loadings[level_pc].values),
+            "slope_score": float(full_delta_aligned @ loadings[slope_pc].values),
+            "curvature_score": float(full_delta_aligned @ loadings[curv_pc].values),
+        })
+        if len(loadings_samples) == 0 or (i - window) % 21 == 0:
+            loadings_samples[trade_date] = loadings
+        L_sub = loadings.loc[tenor_list].values.astype(float)
+        cond = np.linalg.cond(L_sub)
         tenor_labels = [f"{t:g}y" for t in tenors]
-
-        diag_records.append(
-            {
-                "date": trade_date,
-                "cond_number": cond,
-                "expl_var_pc1": res["explained_variance_ratio"][0],
-                "expl_var_pc2": res["explained_variance_ratio"][1],
-                "expl_var_pc3": res["explained_variance_ratio"][2],
-                "level_pc": level_pc,
-                "slope_pc": slope_pc,
-                "curvature_pc": curv_pc,
-                # Loadings at butterfly tenors (using identified roles)
-                f"level_{tenor_labels[0]}": loadings.loc[tenors[0], level_pc],
-                f"level_{tenor_labels[1]}": loadings.loc[tenors[1], level_pc],
-                f"level_{tenor_labels[2]}": loadings.loc[tenors[2], level_pc],
-                f"slope_{tenor_labels[0]}": loadings.loc[tenors[0], slope_pc],
-                f"slope_{tenor_labels[1]}": loadings.loc[tenors[1], slope_pc],
-                f"slope_{tenor_labels[2]}": loadings.loc[tenors[2], slope_pc],
-                f"curv_{tenor_labels[0]}": loadings.loc[tenors[0], curv_pc],
-                f"curv_{tenor_labels[1]}": loadings.loc[tenors[1], curv_pc],
-                f"curv_{tenor_labels[2]}": loadings.loc[tenors[2], curv_pc],
-            }
-        )
-
-    if skipped:
-        warnings.warn(f"Skipped {skipped} dates due to PCA failures or NaN data")
-
+        diag_records.append({
+            "date": trade_date,
+            "cond_number": cond,
+            "expl_var_pc1": res["explained_variance_ratio"][0],
+            "expl_var_pc2": res["explained_variance_ratio"][1],
+            "expl_var_pc3": res["explained_variance_ratio"][2],
+            "level_pc": level_pc,
+            "slope_pc": slope_pc,
+            "curvature_pc": curv_pc,
+            f"level_{tenor_labels[0]}": loadings.loc[tenors[0], level_pc],
+            f"level_{tenor_labels[1]}": loadings.loc[tenors[1], level_pc],
+            f"level_{tenor_labels[2]}": loadings.loc[tenors[2], level_pc],
+            f"slope_{tenor_labels[0]}": loadings.loc[tenors[0], slope_pc],
+            f"slope_{tenor_labels[1]}": loadings.loc[tenors[1], slope_pc],
+            f"slope_{tenor_labels[2]}": loadings.loc[tenors[2], slope_pc],
+            f"curv_{tenor_labels[0]}": loadings.loc[tenors[0], curv_pc],
+            f"curv_{tenor_labels[1]}": loadings.loc[tenors[1], curv_pc],
+            f"curv_{tenor_labels[2]}": loadings.loc[tenors[2], curv_pc],
+        })
     weights_df = pd.DataFrame(weights_records).set_index("date")
     pnl_df = pd.DataFrame(pnl_records).set_index("date")
     daily_pnl = pnl_df["daily_pnl"]
     cumulative_pnl = daily_pnl.cumsum()
     diagnostics = pd.DataFrame(diag_records).set_index("date")
-    pc_scores = pd.DataFrame(score_records).set_index("date") if score_records else pd.DataFrame()
-
+    pc_scores = pd.DataFrame(score_records).set_index("date")
     return {
         "weights": weights_df,
         "daily_pnl": daily_pnl,
