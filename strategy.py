@@ -9,15 +9,8 @@ from pca import pca_on_curves
 # ── PC identification ──────────────────────────────────────────────────
 
 def identify_pcs(loadings: pd.DataFrame) -> dict[str, str]:
-    """Classify PCs as 'level', 'slope', or 'curvature' by loading shape.
-
-    Uses structural properties (more robust than template correlation):
-      - level:     loadings are most uniform (lowest relative variation)
-      - slope:     loadings have highest |correlation with maturity|
-      - curvature: the remaining PC
-
-    Returns a mapping like {'PC1': 'level', 'PC2': 'slope', 'PC3': 'curvature'}.
-    """
+    """Classify PCs as 'level', 'slope', or 'curvature' by loading shape """
+    
     mats = np.array(loadings.index, dtype=float)
     pc_cols = list(loadings.columns)
 
@@ -51,12 +44,8 @@ def _enforce_sign_convention(
     loadings: pd.DataFrame,
     pc_roles: dict[str, str],
 ) -> pd.DataFrame:
-    """Flip eigenvector signs so that loadings have a stable orientation.
-
-    level:     sum of loadings is positive
-    slope:     loading increases with maturity (long end > short end)
-    curvature: loading at the median maturity is positive (belly is positive)
-    """
+    """Flip eigenvector signs. level: +, slope:long end > short end, curvature: belly +) """
+    
     loadings = loadings.copy()
     mats = loadings.index.tolist()
 
@@ -109,14 +98,8 @@ def apply_trading_signals(
     take_profit_bps: float = 30.0,
     pnl_scale: float = 10_000.0,
 ) -> dict:
-    """Apply z-score mean-reversion signals to the butterfly strategy.
+    """Apply z-score mean-reversion signals to the butterfly strategy"""
 
-    Tracks the butterfly spread level (w' @ rates) and its rolling z-score.
-    Entry when |z| > entry_threshold, exit when |z| < exit_threshold or
-    when stop-loss/take-profit hit.
-
-    Returns a dict augmenting strategy_results with signal-based PnL.
-    """
     weights = strategy_results["weights"]
     tenor_list = list(tenors)
     w_keys = [f"w_{t:g}" for t in tenors]
@@ -354,28 +337,7 @@ def rolling_pca_butterfly(
     n_components: int = 3,
     pnl_scale: float = 10_000.0,
 ) -> dict:
-    """Run rolling-window PCA and compute butterfly strategy PnL.
-
-    PCs are identified by loading shape each window (not assumed in order).
-
-    Parameters
-    ----------
-    curves : pd.DataFrame
-        Interpolated yield curves (dates x maturities in decimal).
-    window : int
-        Estimation window in business days.
-    tenors : tuple
-        Butterfly tenors (short wing, belly, long wing).
-    n_components : int
-        Number of PCA components to extract.
-    pnl_scale : float
-        Multiplier for PnL (10_000 converts decimal to bps).
-
-    Returns
-    -------
-    dict with keys: weights, daily_pnl, cumulative_pnl, rolling_loadings,
-    diagnostics, pc_scores.
-    """
+    """Run rolling-window PCA and compute butterfly strategy PnL """
     dates = curves.index.tolist()
     n = len(dates)
     tenor_list = list(tenors)

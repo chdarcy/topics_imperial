@@ -1,4 +1,3 @@
-"""Performance analytics and plotting for the PCA butterfly strategy."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,6 +26,7 @@ def compute_performance_metrics(
     annualization_factor: int = 252,
 ) -> dict:
     """Compute strategy performance statistics."""
+
     pnl = daily_pnl.dropna()
     if len(pnl) == 0:
         return {}
@@ -65,7 +65,6 @@ def compute_performance_metrics(
 
 
 def compute_turnover(weights: pd.DataFrame) -> pd.Series:
-    """Daily turnover as sum of absolute weight changes."""
     return weights.diff().abs().sum(axis=1)
 
 
@@ -73,7 +72,7 @@ def generate_trade_log(
     weights: pd.DataFrame,
     daily_pnl: pd.Series,
 ) -> pd.DataFrame:
-    """Create a trade log with weights, PnL, and turnover."""
+    
     log = weights.copy()
     log["turnover"] = compute_turnover(weights)
     log["daily_pnl_bps"] = daily_pnl.reindex(log.index)
@@ -90,14 +89,7 @@ def factor_correlation_analysis(
     daily_pnl: pd.Series,
     pc_scores: pd.DataFrame,
 ) -> dict:
-    """Analyse correlation between strategy PnL and PC factor scores.
-
-    The PnL should be uncorrelated with level/slope scores and strongly
-    correlated with curvature scores.
-
-    Returns a dict with correlations, R-squared from regression, and
-    a summary DataFrame.
-    """
+    
     # Align on common dates
     common = daily_pnl.index.intersection(pc_scores.index)
     pnl = daily_pnl.loc[common].values
@@ -163,15 +155,8 @@ def plot_results(
     output_dir: Optional[Path] = None,
     label: str = "",
 ) -> None:
-    """Generate all strategy plots.
-
-    Creates 3 figures:
-      1. Strategy performance (cumPnL, weights, turnover, rolling Sharpe)
-      2. PCA dynamics (loadings by role, explained variance, condition number,
-         PC role assignments)
-      3. Factor correlation (PnL vs each factor score scatter + time series)
-    If signal-based results are present, overlays signal PnL on figure 1.
-    """
+    """Generate 3 strategy plots, Strategy performance, PCA dynamics, Factor correlation"""
+    
     weights = strategy_results["weights"]
     daily_pnl = strategy_results["daily_pnl"]
     cumulative_pnl = strategy_results["cumulative_pnl"]
@@ -383,6 +368,7 @@ def plot_variant_cumulative_pnl(
     output_dir: Optional[Path] = None,
 ) -> None:
     """Overlay cumulative PnL of all variants for a single curve configuration."""
+
     from strategy import (
         apply_vol_scaling, apply_momentum_signal, apply_carry_overlay,
     )
@@ -436,6 +422,7 @@ def plot_full_sample_pca(
     output_dir: Optional[Path] = None,
 ) -> None:
     """Two-panel figure: (a) loading shapes, (b) explained variance bar chart."""
+
     output_dir = Path(output_dir) if output_dir else Path("output")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -481,6 +468,7 @@ def plot_pc_role_tracking(
     output_dir: Optional[Path] = None,
 ) -> None:
     """Show which PC is assigned to curvature over time for each strategy."""
+
     output_dir = Path(output_dir) if output_dir else Path("output")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -527,7 +515,8 @@ def plot_drawdown_comparison(
     all_results: list[dict],
     output_dir: Optional[Path] = None,
 ) -> None:
-    """Underwater (drawdown) chart for static strategies across all curves."""
+    """Drawdown chart for static strategies across all curves."""
+
     output_dir = Path(output_dir) if output_dir else Path("output")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -562,6 +551,7 @@ def plot_weight_stability(
     output_dir: Optional[Path] = None,
 ) -> None:
     """Show rolling butterfly weights and their stability over time."""
+
     output_dir = Path(output_dir) if output_dir else Path("output")
     output_dir.mkdir(parents=True, exist_ok=True)
 

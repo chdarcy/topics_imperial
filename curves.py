@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from typing import Iterable
-
 import pandas as pd
 
 
@@ -50,12 +48,7 @@ def interpolate_to_grid(
     scale: float = 0.01,
     min_valid: int = 10,
 ) -> pd.DataFrame:
-    """Vectorised interpolation onto target maturities.
-
-    Drops rows that have fewer than ``min_valid`` non-NaN source rates (they
-    cannot be reliably interpolated). Returns a DataFrame indexed by date with
-    float columns matching target maturities.
-    """
+    
     tenor_map = TENOR_MAP
 
     # Deduplicate and sort index
@@ -79,47 +72,14 @@ def interpolate_to_grid(
     all_cols = sorted(set(rates.columns).union(target))
     rates_reindexed = rates.reindex(columns=all_cols)
 
-
-    """
-    Example (before interpolation):
-
-    Date        1Y   3Y   7Y   15Y
-    2024-01-01  2.0  2.5  NaN  3.0
-    2024-01-02  2.1  NaN  2.8  3.1
-
-    Target maturities: [1, 2, 3, 5, 7, 10, 15]
-
-    After interpolation:
-
-    Date        1Y   2Y    3Y   5Y    7Y     10Y     15Y
-    2024-01-01  2.0  2.25  2.5  2.75  2.875  2.9375  3.0
-    2024-01-02  2.1  2.45  2.8  2.95  2.975  3.0375  3.1
-    """
     rates_interp = rates_reindexed.interpolate(axis=1, method="linear", limit_area="inside")
 
     return rates_interp[target]
 
 
 def compute_forward_rates(spot_curves: pd.DataFrame) -> pd.DataFrame:
-    """Compute forward rates between adjacent maturities on the grid.
-
-    For consecutive maturities T_{i-1} and T_i on the grid, the forward
-    rate over [T_{i-1}, T_i] is:
-
-        f_i = (T_i * S(T_i) - T_{i-1} * S(T_{i-1})) / (T_i - T_{i-1})
-
-    This uses the linear zero-rate approximation appropriate for OIS rates.
-
-    Parameters
-    ----------
-    spot_curves : pd.DataFrame
-        Interpolated spot curves (dates x maturities in decimal).
-
-    Returns
-    -------
-    pd.DataFrame of forward rates, indexed by date, columns are the
-    right-endpoint maturity of each forward interval.
-    """
+    """Compute forward rates between adjacent maturities on the grid """
+    
     mats = sorted(float(c) for c in spot_curves.columns)
     result = pd.DataFrame(index=spot_curves.index)
 
