@@ -45,7 +45,7 @@ TENOR_MAP = {
 
 def interpolate_to_grid(
     df: pd.DataFrame,
-    target_maturities: Iterable[float] = (1, 2, 3, 5, 7, 10, 15, 20, 30),
+    target_maturities: Iterable[float],
     *,
     scale: float = 0.01,
     min_valid: int = 10,
