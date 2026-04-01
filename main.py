@@ -7,13 +7,12 @@ from pca import pca_on_curves
 from strategy import (
 	rolling_pca_butterfly, apply_trading_signals, identify_pcs,
 	apply_vol_scaling, apply_momentum_signal, apply_carry_overlay,
-	apply_pc_score_momentum, apply_regime_filter,
 )
 from analytics import (
-	compute_performance_metrics, plot_results, generate_trade_log,
-	factor_correlation_analysis, plot_regime_mismatch,
-	plot_variant_comparison_bar, plot_variant_cumulative_pnl,
-	plot_variant_metrics_table, plot_loading_shapes, plot_full_sample_pca,
+	compute_performance_metrics, plot_results,
+	factor_correlation_analysis,
+	plot_variant_cumulative_pnl,
+	plot_full_sample_pca,
 	plot_pc_role_tracking, plot_drawdown_comparison, plot_weight_stability,
 )
 
@@ -95,20 +94,6 @@ def run_strategy(curves, label, base, tenors, window=252):
 	print_metrics(m_carry)
 	variant_metrics["carry_mr"] = m_carry
 
-	# Variant 4: PC score momentum
-	print("\n  --- Variant: PC3 score momentum ---")
-	pc_mom = apply_pc_score_momentum(strategy, lookback=10)
-	m_pc = compute_performance_metrics(pc_mom["variant_daily_pnl"])
-	print_metrics(m_pc)
-	variant_metrics["pc_score_mom"] = m_pc
-
-	# Variant 5: Regime filter
-	print("\n  --- Variant: Regime filter (vol > 50th pct) ---")
-	reg = apply_regime_filter(strategy, vol_window=63, vol_threshold_pct=50.0)
-	m_reg = compute_performance_metrics(reg["variant_daily_pnl"])
-	print_metrics(m_reg)
-	variant_metrics["regime_filter"] = m_reg
-
 	# Factor correlation analysis
 	pc_scores = strategy["pc_scores"]
 	print("\n  --- Factor Correlation Analysis ---")
@@ -120,10 +105,6 @@ def run_strategy(curves, label, base, tenors, window=252):
 	print(f"  Betas:")
 	for k, v in corr_result["betas"].items():
 		print(f"    {k:20s}: {v:+.4f}")
-
-	# Trade log
-	trade_log = generate_trade_log(strategy["weights"], strategy["daily_pnl"])
-	trade_log.to_csv(base / f"trade_log_{label.replace(' ', '_').lower()}.csv")
 
 	# Plots
 	plot_results(strategy, output_dir=output_dir, label=label)
@@ -170,8 +151,6 @@ def print_summary_table(all_results: list[dict]) -> None:
 			"vol_scaled": "+ vol-scaled",
 			"momentum": "+ momentum",
 			"carry_mr": "+ carry+MR",
-			"pc_score_mom": "+ PC3 momentum",
-			"regime_filter": "+ regime filter",
 		}
 		for key, display in variant_names.items():
 			if key in variant_metrics:
@@ -237,10 +216,6 @@ def main():
 	r3 = run_strategy(fwd_curves, "fwd_1y", base, tenors=(3.0, 7.0, 15.0))
 	all_results.append(r3)
 
-	# ── Regime mismatch chart ──────────────────────────────────────
-	print("\n  Generating regime mismatch chart...")
-	plot_regime_mismatch(interpolated, window=252, output_dir=output_dir)
-
 	# ── Full-sample PCA figure ─────────────────────────────────────
 	print("  Generating full-sample PCA figure...")
 	plot_full_sample_pca(res["loadings"], list(res_full["explained_variance_ratio"][:3]),
@@ -249,8 +224,6 @@ def main():
 	# ── New comparison plots ───────────────────────────────────────
 	if all_results:
 		print("  Generating variant comparison plots...")
-		plot_variant_comparison_bar(all_results, output_dir=output_dir)
-		plot_variant_metrics_table(all_results, output_dir=output_dir)
 		plot_pc_role_tracking(all_results, output_dir=output_dir)
 		plot_drawdown_comparison(all_results, output_dir=output_dir)
 
@@ -264,8 +237,8 @@ def main():
 
 		for r in all_results:
 			lbl = r["label"]
-			plot_loading_shapes(r["strategy"], label=lbl, output_dir=output_dir)
-			plot_weight_stability(r["strategy"], label=lbl, output_dir=output_dir)
+			if lbl == "spot_1y-30y":
+				plot_weight_stability(r["strategy"], label=lbl, output_dir=output_dir)
 			if lbl in curves_map:
 				cd, tn = curves_map[lbl]
 				plot_variant_cumulative_pnl(cd, r["strategy"], tn, lbl,
