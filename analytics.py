@@ -399,8 +399,8 @@ def plot_regime_mismatch(
         fwd_curves = curves.iloc[i: i + forward_window + 1]
 
         try:
-            est_res = pca_on_curves(est_curves, n_components=3, standardize=True)
-            fwd_res = pca_on_curves(fwd_curves, n_components=3, standardize=True)
+            est_res = pca_on_curves(est_curves, n_components=3)
+            fwd_res = pca_on_curves(fwd_curves, n_components=3)
         except ValueError:
             continue
 

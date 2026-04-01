@@ -1,18 +1,3 @@
-"""PCA utilities for yield curve daily changes.
-
-This module computes principal components from daily changes of yield curves.
-Input: DataFrame indexed by date with maturities (years) as float columns.
-
-API:
- - pca_on_curves(curves_df, n_components=None, standardize=True, min_obs=2)
-     returns a dict with keys: loadings (DataFrame), scores (DataFrame),
-     eigenvalues (np.ndarray), explained_variance_ratio (np.ndarray), means, stds
-
-Implementation notes:
- - Uses numpy eigendecomposition on the sample covariance matrix (no sklearn).
- - Computes daily differences first to ensure stationarity.
- - Optionally standardizes columns (z-score) before PCA.
-"""
 from __future__ import annotations
 
 from typing import Optional
@@ -25,7 +10,6 @@ def pca_on_curves(
     curves: pd.DataFrame,
     n_components: Optional[int] = None,
     *,
-    standardize: bool = True,
     min_obs: int = 2,
 ) -> dict:
     """Run PCA on daily changes of yield curves.
@@ -33,7 +17,7 @@ def pca_on_curves(
     Parameters
     - curves: DataFrame indexed by date, columns are maturities (floats).
     - n_components: number of PCs to keep (defaults to all).
-    - standardize: if True, z-score columns (zero mean, unit std) before PCA.
+    (Always standardizes: z-score columns to zero mean, unit std before PCA.)
     - min_obs: minimum number of observations (after differencing and dropping NaNs).
 
     Returns a dict with:
@@ -42,7 +26,7 @@ def pca_on_curves(
     - eigenvalues: ndarray of eigenvalues (descending)
     - explained_variance_ratio: ndarray
     - means: Series of column means used (on diffs)
-    - stds: Series of column stds used (or None if not standardizing)
+    - stds: Series of column stds used
     """
     if curves.shape[1] == 0:
         raise ValueError("Input curves DataFrame has no maturity columns")
@@ -64,27 +48,23 @@ def pca_on_curves(
 
     # handle zero-variance (non-positive or NaN) columns after differencing
     dropped_columns = []
-    stds = None
-    if standardize:
-        stds = diffs.std(axis=0, ddof=1)
-        zero_std = stds[(stds <= 0) | stds.isna()].index.tolist()
-        if zero_std:
-            dropped_columns = zero_std
-            diffs = diffs.drop(columns=zero_std)
+    stds = diffs.std(axis=0, ddof=1)
+    zero_std = stds[(stds <= 0) | stds.isna()].index.tolist()
+    if zero_std:
+        dropped_columns = zero_std
+        diffs = diffs.drop(columns=zero_std)
 
     # store the (possibly reduced) columns used for PCA
     cols_used = list(diffs.columns)
 
     # recompute means/stds on the reduced diffs
     means = diffs.mean(axis=0)
-    if standardize:
-        stds = diffs.std(axis=0, ddof=1)
+    stds = diffs.std(axis=0, ddof=1)
 
     X = diffs.values  # shape (T, M)
     X_centered = X - means.values
-    if standardize:
-        # divide directly by remaining stds (we already dropped non-positive/NaN)
-        X_centered = X_centered / stds.values
+    # Always standardize
+    X_centered = X_centered / stds.values
 
     # covariance matrix (variables in columns)
     cov = np.cov(X_centered, rowvar=False, bias=False)
@@ -122,7 +102,7 @@ def pca_on_curves(
         "eigenvalues": eigvals,
         "explained_variance_ratio": explained_variance_ratio,
         "means": means,
-        "stds": (stds if standardize else None),
+        "stds": stds,
     }
     if dropped_columns:
         result["dropped_columns"] = dropped_columns

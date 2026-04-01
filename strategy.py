@@ -482,7 +482,6 @@ def rolling_pca_butterfly(
     window: int = 252,
     tenors: tuple[float, float, float] = (3.0, 7.0, 15.0),
     n_components: int = 3,
-    standardize: bool = True,
     pnl_scale: float = 10_000.0,
 ) -> dict:
     """Run rolling-window PCA and compute butterfly strategy PnL.
@@ -499,8 +498,6 @@ def rolling_pca_butterfly(
         Butterfly tenors (short wing, belly, long wing).
     n_components : int
         Number of PCA components to extract.
-    standardize : bool
-        Whether to z-score before PCA.
     pnl_scale : float
         Multiplier for PnL (10_000 converts decimal to bps).
 
@@ -526,8 +523,7 @@ def rolling_pca_butterfly(
 
         try:
             res = pca_on_curves(
-                window_curves, n_components=n_components, standardize=standardize
-            )
+                window_curves, n_components=n_components)
         except ValueError:
             skipped += 1
             continue

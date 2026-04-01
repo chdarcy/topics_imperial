@@ -41,9 +41,7 @@ def run_strategy(curves, label, base, tenors=(3.0, 7.0, 15.0), window=252):
 	output_dir = base / "output"
 
 	# Rolling PCA butterfly (static, always-on)
-	strategy = rolling_pca_butterfly(
-		curves, window=window, tenors=tenors, n_components=3, standardize=True,
-	)
+	strategy = rolling_pca_butterfly(curves, window=window, tenors=tenors, n_components=3)
 
 	if len(strategy["daily_pnl"]) == 0:
 		print("  No trading days produced — skipping.")
@@ -460,16 +458,16 @@ def main():
 	df = DataLoader.load_sheet(xlsx_path=base / "input.xlsx", sheet_name="gbp ois results")
 	print(f"Raw data shape: {df.shape}")
 
-	# ── 1. Full curve spot rates (1y-30y) ──────────────────────────
+	# Interpolate to grid
 	interpolated = interpolate_to_grid(df)
 	print(f"Interpolated spot curves: {interpolated.shape}")
 	print(f"Date range: {interpolated.index[0]} to {interpolated.index[-1]}")
 
 	# Full-sample PCA for reference + PC identification
 	print("\n*******************Full-Sample PCA*******************")
-	res = pca_on_curves(interpolated, n_components=3, standardize=True)
+	res = pca_on_curves(interpolated, n_components=3)
 	# Also compute full PCA to get true (non-renormalized) variance ratios
-	res_full = pca_on_curves(interpolated, n_components=None, standardize=True)
+	res_full = pca_on_curves(interpolated, n_components=None)
 	print("Explained variance ratio (first 3 of 9):", [f"{x:.4f}" for x in res_full["explained_variance_ratio"][:3]])
 	print(f"Cumulative (3 PCs): {sum(res_full['explained_variance_ratio'][:3]):.4f}")
 	print("\nLoadings:")
