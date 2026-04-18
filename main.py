@@ -213,7 +213,7 @@ def main():
 
 	# ── Strategy 3: Forward rates, full curve ──────────────────────
 	fwd_curves = compute_forward_rates(interpolated)
-	r3 = run_strategy(fwd_curves, "fwd_1y", base, tenors=(3.0, 7.0, 15.0))
+	r3 = run_strategy(fwd_curves, "fwd", base, tenors=(3.0, 7.0, 15.0))
 	all_results.append(r3)
 
 	# ── Full-sample PCA figure ─────────────────────────────────────
@@ -233,7 +233,7 @@ def main():
 			"spot_1y-10y": (interp_10y, (2.0, 5.0, 10.0)),
 		}
 		if fwd_curves.shape[1] >= 3:
-			curves_map["fwd_1y"] = (fwd_curves, (3.0, 7.0, 15.0))
+			curves_map["fwd"] = (fwd_curves, (3.0, 7.0, 15.0))
 
 		for r in all_results:
 			lbl = r["label"]
