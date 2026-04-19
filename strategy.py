@@ -91,7 +91,7 @@ def apply_trading_signals(
     strategy_results: dict,
     curves: pd.DataFrame,
     tenors: tuple[float, float, float] = (3.0, 7.0, 15.0),
-    zscore_window: int = 63,
+    zscore_window: int = 63, # 252/4
     entry_threshold: float = 1.5,
     exit_threshold: float = 0.5,
     stop_loss_bps: float = 50.0,
@@ -110,15 +110,17 @@ def apply_trading_signals(
         w = row[w_keys].values.astype(float)
         if date in curves.index:
             rates = curves.loc[date, tenor_list].values.astype(float)
+
+            # Spread level - how relatively high / low the belly is relative to the wings
             spread_val = float(np.dot(w, rates)) * pnl_scale
             spread_records.append({"date": date, "spread": spread_val})
 
     spread_df = pd.DataFrame(spread_records).set_index("date")
     spread = spread_df["spread"]
 
-    # Rolling z-score of the spread
-    rolling_mean = spread.rolling(zscore_window, min_periods=20).mean()
-    rolling_std = spread.rolling(zscore_window, min_periods=20).std()
+    # Rolling z-score of the spread wrt zcscore_window
+    rolling_mean = spread.rolling(zscore_window).mean()
+    rolling_std = spread.rolling(zscore_window).std()
     zscore = (spread - rolling_mean) / rolling_std
 
     # Generate positions: +1 = long butterfly, -1 = short, 0 = flat
@@ -164,6 +166,9 @@ def apply_trading_signals(
         position.iloc[idx] = new_pos
 
         # Apply position to next day's PnL
+        # (-fly) * -1 = good
+        # (+fly) * +1 = good
+        # (-fly) * +1 = bad
         if idx < len(pnl_dates):
             pnl_date = pnl_dates[idx] if idx < len(pnl_dates) else None
             if pnl_date is not None and pnl_date in raw_pnl.index:
@@ -195,19 +200,21 @@ def apply_vol_scaling(
     vol_window: int = 63,
     vol_target_bps: float = 5.0,
 ) -> dict:
-    """Volatility-scaled butterfly: size the position inversely proportional
-    to recent realised volatility so that the ex-ante daily risk is constant.
+    """Volatility-scaled z-score MR: apply the z-score mean-reversion signal
+    with position size scaled inversely to recent realised butterfly volatility,
+    targeting constant ex-ante daily risk (Moskowitz, Ooi & Pedersen 2012).
 
-    Literature: standard in rates RV desks (Golub & Tilman 2000, Ch.6;
-    Hariparsad & Maré 2023 use duration-neutral + vol-normalised sizing).
+    Vol is estimated from the underlying butterfly returns (not the signal PnL)
+    so the scaling reflects instrument risk, not signal activity.
     """
     raw_pnl = strategy_results["daily_pnl"]
-    rolling_vol = raw_pnl.rolling(vol_window, min_periods=20).std()
+    signal_pos = strategy_results["signal_position"].reindex(raw_pnl.index, method="ffill").fillna(0.0)
 
+    rolling_vol = raw_pnl.rolling(vol_window).std()
     scale = vol_target_bps / rolling_vol.replace(0, np.nan)
     scale = scale.clip(upper=5.0)  # cap leverage at 5x
 
-    scaled_pnl = raw_pnl * scale.shift(1)  # use lagged vol
+    scaled_pnl = raw_pnl * signal_pos * scale.shift(1)
     scaled_pnl = scaled_pnl.dropna()
 
     return {
@@ -295,8 +302,8 @@ def apply_carry_overlay(
 
     spread_df = pd.DataFrame(spread_records).set_index("date")
     spread = spread_df["spread"]
-    rolling_mean = spread.rolling(63, min_periods=20).mean()
-    rolling_std = spread.rolling(63, min_periods=20).std()
+    rolling_mean = spread.rolling(63).mean()
+    rolling_std = spread.rolling(63).std()
     zscore = (spread - rolling_mean) / rolling_std
 
     # Reversion signal: sell if z > 1, buy if z < -1
