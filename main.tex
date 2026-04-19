@@ -553,9 +553,9 @@ Key observations from Table~\ref{tab:summary}:
         on the wrong side.  This is event risk, not structural absence
         of curvature trending.
   \item Vol-scaling, which sizes z-score MR positions in proportion to a
-        rolling volatility target, improves the Sharpe ratio materially on
-        spot~1Y--30Y (0.92 versus 1.14 for unrestricted MR) and reduces
-        drawdown on the forward curve (94\,bps vs.\ 121\,bps for MR), but
+        rolling volatility target, decreases the Sharpe ratio on
+        spot~1Y--30Y (0.92 versus 1.14 for unrestricted MR) but reduces
+        drawdown on the forward curve (94\,bps vs.\ 121\,bps for MR) as expected. It
         produces negative returns on spot~1Y--10Y ($-$0.23), where the
         MR signal itself is weak.  This is consistent with vol-scaling
         acting as a position sizer rather than an independent return source.
@@ -703,26 +703,6 @@ spot rates embed overlapping forward exposures that blur factor separation.}
 Higher curvature correlation ($\rho=0.40$, $R^{2}=0.17$) than the full spot
 curve but still far below the forward-rate result.}
 \label{fig:factor_corr_spot10}
-\end{figure}
-
-\subsection{PCA Dynamics and Regime Analysis}
-\label{sec:pca_dynamics}
-Figure~\ref{fig:pca_dyn} shows the rolling PCA dynamics for the spot
-1Y--30Y strategy, including explained variance by PC role, condition
-number, and PC role assignments.  During the hold regime (blue shading),
-PC2 and PC3 swap roles repeatedly; the curvature factor is PC3 in
-approximately 65\% of windows and PC2 in the remaining 35\%.  This
-instability is most pronounced when the eigenvalues of slope and
-curvature are close, which occurs during the low-volatility hold period.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.92\textwidth]{pca_dynamics_spot_1y-30y.png}
-\caption{Rolling PCA dynamics for spot 1Y--30Y.  From top: explained
-variance by factor role; cumulative explained variance; condition number
-of the loading matrix; PC role assignment (which ordinal PC maps to
-each economic factor).}
-\label{fig:pca_dyn}
 \end{figure}
 
 \subsubsection{PC Role Tracking}

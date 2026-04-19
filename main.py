@@ -197,8 +197,6 @@ def main():
 	print("\nLoadings:")
 
 	pc_roles = identify_pcs(res["loadings"])
-	full_sample_loadings = _enforce_sign_convention(res["loadings"], pc_roles)
-	print(full_sample_loadings.to_string(float_format="{:.4f}".format))
 	print(f"\nPC identification: {pc_roles}")
 
 	# Collect results from all strategies
@@ -218,14 +216,9 @@ def main():
 	r3 = run_strategy(fwd_curves, "fwd", base, tenors=(3.0, 7.0, 15.0))
 	all_results.append(r3)
 
-	# ── Strategy 4: Forward rates, truncated to 1-10y ──────────────
-	fwd_curves_10y = compute_forward_rates(interp_10y)
-	r4 = run_strategy(fwd_curves_10y, "fwd_1y-10y", base, tenors=(2.0, 5.0, 10.0))
-	all_results.append(r4)
-
 	# ── Full-sample PCA figure ─────────────────────────────────────
 	print("  Generating full-sample PCA figure...")
-	plot_full_sample_pca(full_sample_loadings, list(res_full["explained_variance_ratio"][:3]),
+	plot_full_sample_pca(res["loadings"], list(res_full["explained_variance_ratio"][:3]),
 						 output_dir=output_dir)
 
 	# ── New comparison plots ───────────────────────────────────────
@@ -241,8 +234,6 @@ def main():
 		}
 		if fwd_curves.shape[1] >= 3:
 			curves_map["fwd"] = (fwd_curves, (3.0, 7.0, 15.0))
-		if fwd_curves_10y.shape[1] >= 3:
-			curves_map["fwd_1y-10y"] = (fwd_curves_10y, (2.0, 5.0, 10.0))
 
 		for r in all_results:
 			lbl = r["label"]

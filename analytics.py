@@ -472,7 +472,8 @@ def plot_pc_role_tracking(
     output_dir = Path(output_dir) if output_dir else Path("output")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    n = len(all_results)
+    filtered_results = [r for r in all_results if r.get("label") != "fwd_1y-10y"]
+    n = len(filtered_results)
     fig, axes = plt.subplots(n, 1, figsize=(14, 2.5 * n), sharex=True)
     if n == 1:
         axes = [axes]
@@ -481,7 +482,7 @@ def plot_pc_role_tracking(
     pc_map = {"PC1": 1, "PC2": 2, "PC3": 3}
     colors_map = {1: "#2c3e50", 2: "#e74c3c", 3: "#27ae60"}
 
-    for idx, r in enumerate(all_results):
+    for idx, r in enumerate(filtered_results):
         ax = axes[idx]
         diag = r["strategy"]["diagnostics"]
         if "curvature_pc" not in diag.columns:
