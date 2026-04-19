@@ -355,10 +355,14 @@ def rolling_pca_butterfly(
         pc_roles = identify_pcs(loadings)
         loadings = _enforce_sign_convention(loadings, pc_roles)
         w = solve_butterfly_weights(loadings, pc_roles=pc_roles, tenors=tenors)
+
+        # PnL date set one day ahead therefore we are calculating PnL data using previous data (no look ahead)
         trade_date = dates[i]
         pnl_date = dates[i + 1]
         delta = curves.loc[pnl_date, tenor_list] - curves.loc[trade_date, tenor_list]
         daily_pnl = float(np.dot(w, delta.values)) * pnl_scale
+
+        # Support + Plotting
         w_keys = [f"w_{t:g}" for t in tenors]
         weights_records.append({"date": trade_date, **dict(zip(w_keys, w))})
         pnl_records.append({"date": pnl_date, "daily_pnl": daily_pnl})
