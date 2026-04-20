@@ -68,20 +68,6 @@ def compute_turnover(weights: pd.DataFrame) -> pd.Series:
     return weights.diff().abs().sum(axis=1)
 
 
-def generate_trade_log(
-    weights: pd.DataFrame,
-    daily_pnl: pd.Series,
-) -> pd.DataFrame:
-    
-    log = weights.copy()
-    log["turnover"] = compute_turnover(weights)
-    log["daily_pnl_bps"] = daily_pnl.reindex(log.index)
-    if log["daily_pnl_bps"].isna().all():
-        log["daily_pnl_bps"] = daily_pnl.values[: len(log)]
-    log["cumulative_pnl_bps"] = log["daily_pnl_bps"].cumsum()
-    log.index.name = "date"
-    return log
-
 
 # ── Factor correlation analysis (requirement 6) ───────────────────────
 
@@ -142,10 +128,6 @@ def _add_regime_shading(ax: plt.Axes) -> None:
         )
 
 
-def _format_date_axis(axes) -> None:
-    for a in axes:
-        a.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-        a.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
 
 
 # ── Main plotting function ────────────────────────────────────────────

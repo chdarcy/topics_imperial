@@ -1,5 +1,4 @@
 from pathlib import Path
-import pandas as pd
 
 from data_loader import DataLoader
 from curves import interpolate_to_grid, compute_forward_rates
@@ -7,7 +6,6 @@ from pca import pca_on_curves
 from strategy import (
 	rolling_pca_butterfly, apply_trading_signals, identify_pcs,
 	apply_vol_scaling, apply_momentum_signal, apply_carry_overlay,
-	_enforce_sign_convention,
 )
 from analytics import (
 	compute_performance_metrics, plot_results,
