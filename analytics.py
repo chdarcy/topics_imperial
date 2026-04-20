@@ -155,7 +155,7 @@ def plot_results(
     output_dir: Optional[Path] = None,
     label: str = "",
 ) -> None:
-    """Generate 3 strategy plots, Strategy performance, PCA dynamics, Factor correlation"""
+    """Generate factor correlation plot for the strategy."""
     
     weights = strategy_results["weights"]
     daily_pnl = strategy_results["daily_pnl"]
@@ -174,146 +174,7 @@ def plot_results(
     w_cols = [c for c in weights.columns if c.startswith("w_")]
     tenor_tag = "s".join(c.replace("w_", "") for c in w_cols) + "s" if w_cols else ""
 
-    # ── Figure 1: Strategy Performance ──────────────────────────────
-    has_signal = "signal_cumulative_pnl" in strategy_results
-    n_panels = 5 if has_signal else 4
-    fig1, axes1 = plt.subplots(n_panels, 1, figsize=(14, 3 * n_panels), sharex=True)
-    fig1.suptitle(f"PCA Butterfly Strategy ({tenor_tag}){title_suffix} — Performance", fontsize=14)
-
-    # Panel A: Cumulative PnL
-    ax = axes1[0]
-    ax.plot(cumulative_pnl.index, cumulative_pnl.values, color="black", linewidth=1.2,
-            label="Static (always-on)")
-    if has_signal:
-        sig_cum = strategy_results["signal_cumulative_pnl"]
-        ax.plot(sig_cum.index, sig_cum.values, color="tab:red", linewidth=1.2,
-                label="Signal-based")
-    ax.set_ylabel("Cumulative PnL (bps)")
-    ax.axhline(0, color="grey", linewidth=0.5, linestyle="--")
-    _add_regime_shading(ax)
-    ax.legend(loc="upper left", fontsize=8, ncol=5)
-
-    # Panel B: Weights
-    ax = axes1[1]
-    w_cols = [c for c in weights.columns if c.startswith("w_")]
-    for col in w_cols:
-        lbl = col.replace("w_", "") + "y"
-        ax.plot(weights.index, weights[col], label=lbl, linewidth=0.8)
-    ax.set_ylabel("Weight")
-    ax.legend(loc="upper left", fontsize=8)
-    _add_regime_shading(ax)
-
-    # Panel C: Turnover
-    ax = axes1[2]
-    turnover = compute_turnover(weights)
-    ax.bar(turnover.index, turnover.values, width=1, color="steelblue", alpha=0.6)
-    ax.set_ylabel("Turnover")
-    _add_regime_shading(ax)
-
-    # Panel D: Rolling 63-day Sharpe
-    ax = axes1[3]
-    rolling_mean = daily_pnl.rolling(63, min_periods=30).mean()
-    rolling_std = daily_pnl.rolling(63, min_periods=30).std()
-    rolling_sharpe = (rolling_mean / rolling_std) * np.sqrt(252)
-    ax.plot(rolling_sharpe.index, rolling_sharpe.values, color="darkgreen", linewidth=0.8,
-            label="Static")
-    if has_signal:
-        sig_pnl = strategy_results["signal_daily_pnl"]
-        sig_rm = sig_pnl.rolling(63, min_periods=30).mean()
-        sig_rs = sig_pnl.rolling(63, min_periods=30).std()
-        sig_sharpe = (sig_rm / sig_rs) * np.sqrt(252)
-        ax.plot(sig_sharpe.index, sig_sharpe.values, color="tab:red", linewidth=0.8,
-                label="Signal")
-        ax.legend(loc="upper left", fontsize=8)
-    ax.axhline(0, color="grey", linewidth=0.5, linestyle="--")
-    ax.set_ylabel("Rolling Sharpe (63d)")
-    _add_regime_shading(ax)
-
-    # Panel E: Signal z-score and position (if present)
-    if has_signal:
-        ax = axes1[4]
-        zscore = strategy_results["zscore"]
-        position = strategy_results["signal_position"]
-        ax.plot(zscore.index, zscore.values, color="tab:purple", linewidth=0.7, label="Z-score")
-        ax.fill_between(position.index, position.values * 2, alpha=0.3, color="tab:orange",
-                        label="Position (scaled)")
-        ax.axhline(1.5, color="grey", linewidth=0.5, linestyle="--")
-        ax.axhline(-1.5, color="grey", linewidth=0.5, linestyle="--")
-        ax.set_ylabel("Z-score / Position")
-        ax.legend(loc="upper left", fontsize=8)
-        _add_regime_shading(ax)
-
-    ax = axes1[-1]
-    ax.set_xlabel("Date")
-    _format_date_axis(axes1)
-    fig1.tight_layout()
-    fig1.autofmt_xdate()
-
-    if output_dir:
-        fig1.savefig(output_dir / f"strategy_performance{suffix}.png", dpi=150, bbox_inches="tight")
-    plt.close(fig1)
-
-    # ── Figure 2: PCA Dynamics ──────────────────────────────────────
-    fig2, axes2 = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
-    fig2.suptitle(f"PCA Butterfly Strategy{title_suffix} — PCA Dynamics", fontsize=14)
-
-    # Panel A: Loadings at butterfly tenors (by identified role)
-    ax = axes2[0]
-    # Auto-detect tenor labels from diagnostics columns (e.g. level_3y, level_2y, ...)
-    tenor_labels = sorted({
-        col.split("_", 1)[1]
-        for col in diagnostics.columns
-        if col.startswith(("level_", "slope_", "curv_"))
-        and col.split("_", 1)[1].endswith("y")
-    }, key=lambda s: float(s.replace("y", "")))
-    palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple"]
-    tenor_colors = {t: palette[i % len(palette)] for i, t in enumerate(tenor_labels)}
-    for role, ls in [("level", "-"), ("slope", "--"), ("curv", ":")]:
-        for tenor_label in tenor_labels:
-            col = f"{role}_{tenor_label}"
-            if col in diagnostics.columns:
-                ax.plot(
-                    diagnostics.index, diagnostics[col],
-                    color=tenor_colors[tenor_label], linestyle=ls, linewidth=0.7,
-                )
-    legend_elements = [
-        Line2D([0], [0], color="grey", linestyle="-", label="Level"),
-        Line2D([0], [0], color="grey", linestyle="--", label="Slope"),
-        Line2D([0], [0], color="grey", linestyle=":", label="Curvature"),
-    ] + [
-        Line2D([0], [0], color=tenor_colors[t], linestyle="-", label=t)
-        for t in tenor_labels
-    ]
-    ax.legend(handles=legend_elements, loc="upper left", fontsize=7, ncol=6)
-    ax.set_ylabel("Loading (by identified role)")
-
-    # Panel B: Explained variance
-    ax = axes2[1]
-    for pc_num in [1, 2, 3]:
-        col = f"expl_var_pc{pc_num}"
-        if col in diagnostics.columns:
-            ax.plot(diagnostics.index, diagnostics[col] * 100, label=f"PC{pc_num}",
-                    linewidth=0.8)
-    ax.set_ylabel("Explained Variance (%)")
-    ax.legend(loc="upper right", fontsize=8)
-
-    # Panel C: Condition number
-    ax = axes2[2]
-    ax.semilogy(diagnostics.index, diagnostics["cond_number"], color="crimson", linewidth=0.8)
-    ax.set_ylabel("Condition Number (log)")
-    ax.set_xlabel("Date")
-    ax.axhline(100, color="grey", linewidth=0.5, linestyle="--", label="Threshold=100")
-    ax.legend(fontsize=8)
-
-    _format_date_axis(axes2)
-    fig2.tight_layout()
-    fig2.autofmt_xdate()
-
-    if output_dir:
-        fig2.savefig(output_dir / f"pca_dynamics{suffix}.png", dpi=150, bbox_inches="tight")
-    plt.close(fig2)
-
-    # ── Figure 3: Factor Correlation Analysis ──────────────────────
+    # ── Figure 1: Factor Correlation Analysis ──────────────────────
     if not pc_scores.empty:
         corr_result = factor_correlation_analysis(daily_pnl, pc_scores)
 
