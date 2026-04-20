@@ -86,6 +86,8 @@ def compute_forward_rates(spot_curves: pd.DataFrame) -> pd.DataFrame:
     for i in range(1, len(mats)):
         t_prev, t_cur = mats[i - 1], mats[i]
         dt = t_cur - t_prev
+        
+        # discrete approximation of f(T) = d(T·S(T))/dT
         result[float(t_cur)] = (
             t_cur * spot_curves[t_cur] - t_prev * spot_curves[t_prev]
         ) / dt

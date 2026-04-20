@@ -18,11 +18,15 @@ def pca_on_curves(
     diffs = diffs.dropna(axis=0, how="any")
 
     X = diffs.values
+
+    # z-score each tenor so PCA on correlation matrix, not covariance — prevents long-end vol dominating
     X_centered = (X - diffs.mean(axis=0).values) / diffs.std(axis=0, ddof=1).values
 
     cov = np.cov(X_centered, rowvar=False, bias=False)
+    
+    # eigh is faster and more stable than eig for symmetric matrices
     eigvals, eigvecs = np.linalg.eigh(cov)
-    order = np.argsort(eigvals)[::-1]
+    order = np.argsort(eigvals)[::-1]  # eigh returns ascending, we want descending
     eigvals = eigvals[order]
     eigvecs = eigvecs[:, order]
 

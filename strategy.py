@@ -80,7 +80,7 @@ def solve_butterfly_weights(
     # L is (3 tenors x 3 PCs) in order [level, slope, curvature]
     L = loadings.loc[tenor_list, ordered_cols].values.astype(float)
     b = np.array([0.0, 0.0, 1.0])
-    w = np.linalg.solve(L.T, b)
+    w = np.linalg.solve(L.T, b)  # solves L^T w = [0,0,1]: zero level/slope, unit curvature
     return w
 
 
@@ -199,13 +199,7 @@ def apply_vol_scaling(
     vol_window: int = 63,
     vol_target_bps: float = 5.0,
 ) -> dict:
-    """Volatility-scaled z-score MR: apply the z-score mean-reversion signal
-    with position size scaled inversely to recent realised butterfly volatility,
-    targeting constant ex-ante daily risk (Moskowitz, Ooi & Pedersen 2012).
-
-    Vol is estimated from the underlying butterfly returns (not the signal PnL)
-    so the scaling reflects instrument risk, not signal activity.
-    """
+    """Scale z-score MR position sizes inversely to realised volatility."""
     raw_pnl = strategy_results["daily_pnl"]
     signal_pos = strategy_results["signal_position"].reindex(raw_pnl.index, method="ffill").fillna(0.0)
 
@@ -229,17 +223,7 @@ def apply_momentum_signal(
     lookback: int = 21,
     holding_period: int = 5,
 ) -> dict:
-    """Curvature momentum / trend-following: go with the recent trend
-    in the butterfly spread rather than betting on mean-reversion.
-
-    If the raw butterfly PnL has been positive over the last `lookback`
-    days, stay long; if negative, go short. Rebalance every
-    `holding_period` days.
-
-    Literature: Dreher, Gräb & Kostka (2020) "From carry trades to curvy
-    trades" show curvature factor has positive autocorrelation at short
-    horizons in EUR; Suimon et al. (2020) use trend signals on JGB.
-    """
+    """Apply trailing-PnL momentum signal with periodic rebalancing."""
     raw_pnl = strategy_results["daily_pnl"]
     cumret = raw_pnl.rolling(lookback, min_periods=10).sum()
 
@@ -270,16 +254,7 @@ def apply_carry_overlay(
     carry_window: int = 21,
     pnl_scale: float = 10_000.0,
 ) -> dict:
-    """Carry-adjusted curvature: combine the z-score mean-reversion signal
-    with a carry (roll-down) signal.  Only enter when both signals agree.
-
-    The carry of the butterfly is estimated as the 21-day trailing average
-    daily PnL — a positive carry means curvature is earning positive theta.
-
-    Literature: Dreher, Gräb & Kostka (2020) "curvy trades" combine carry
-    and value signals on the curvature factor; De Vere (2021) combines
-    macro views with butterfly carry in UST.
-    """
+    """Gate z-score MR entries by trailing carry; size full/half/flat."""
     raw_pnl = strategy_results["daily_pnl"]
 
     # Carry signal: sign of trailing average PnL
